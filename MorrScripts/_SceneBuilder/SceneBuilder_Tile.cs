@@ -17,11 +17,10 @@ public class SceneBuilder_Tile : MonoBehaviour
     //public static List<SceneBuilder_Tile> tylesList = new List<SceneBuilder_Tile>(); 
 
     public List<TileConnection> connectionsList = new List<TileConnection>(){new TileConnection(), new TileConnection()};
-    public Bounds bounds;
+    public Bounds Bounds { get; set; }
 
 
-
-	// Use this for initialization
+    // Use this for initialization
 /*	void Enable () {
 		//if(tylesList.Contains(this)) tylesList.Add(this);
 	}*/
@@ -47,18 +46,21 @@ public class SceneBuilder_Tile : MonoBehaviour
     public void CompoundBounds ( GameObject go )
     {
 
-        bounds = new Bounds ( );
+        Bounds = new Bounds ( );
         Renderer[] renderers = go.GetComponentsInChildren<Renderer> ( );
 
         foreach ( Renderer renderer1 in renderers )
         {
-            if ( bounds.extents == Vector3.zero )
+            if ( Bounds.extents == Vector3.zero )
             {
-                bounds = renderer1.bounds;
+                Bounds = renderer1.bounds;
+                continue;
             }
 
-            bounds.Encapsulate ( renderer1.bounds );
+            Bounds.Encapsulate ( renderer1.bounds );
         }
+
+        //bounds.extents *= 1.3f;
         // bounds = go.GetComponent<Renderer>().bounds;
         //bounds = bounds;
     }
@@ -75,10 +77,17 @@ public class TileConnection
 {
     #region Vars
 
+/*    public enum TileConnectionType
+    {
+        doorWay,
+        metro,
+        streetRoad
+    }*/
+    
     public Transform connectionTransf;
-    public TileConnectionType connectionType;
+    public /*TileConnectionType*/string connectionType = "door";
 
-    public Transform linkedToTransf;
+    public Transform LinkedToTransf { get; set; }
 
 
     #region isOpen
@@ -101,8 +110,8 @@ public class TileConnection
     {
         IsOpened = false;
         link.IsOpened = false;
-        linkedToTransf = link.connectionTransf;
-        link.linkedToTransf = connectionTransf;
+        LinkedToTransf = link.connectionTransf;
+        link.LinkedToTransf = connectionTransf;
     }
 
     public Vector3 InverseCoonectionPos (Vector3 pos, Quaternion rot)
@@ -118,12 +127,7 @@ public class TileConnection
     }
 }
 
-public enum TileConnectionType
-{
-    doorWay,
-    metro,
-    streetRoad
-}
+
 
 
 #endregion

@@ -10,7 +10,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 #endif
 
-
+//[ExecuteInEditMode]
 public class SceneBuilder : MonoBehaviour 
 {
 
@@ -36,7 +36,7 @@ public class SceneBuilder : MonoBehaviour
     public bool generateOnStart = false;
 
     public List<TileConnection> openConnections = new List<TileConnection>();
-
+    List<Bounds> spawnedBounds = new List<Bounds>();
     
     
     public List<SceneBuilder_Tile> TilesList
@@ -61,7 +61,8 @@ public class SceneBuilder : MonoBehaviour
     {
         if (generateOnStart)
         {
-            StartCoroutine(GenRoutine());
+            //StartCoroutine(GenRoutine());
+            Generate();
         }
     }
     
@@ -76,6 +77,7 @@ public class SceneBuilder : MonoBehaviour
         #region Init data
 
         TilesList.Clear();
+        spawnedBounds.Clear();
         
         foreach (var tile in tilesList_withRatio)
         {
@@ -108,11 +110,15 @@ public class SceneBuilder : MonoBehaviour
         List<SceneBuilder_Tile> openTiles = TilesList.Where(v => !v.deadEnd).ToList();
 
 
-        while (openConnections.Count> 0 && currPlacedTilesCount < maxTilesToPlace )
+        for (int i = 0; i < maxTilesToPlace; i++)
+        {
+            SpawningLoop( ref openTiles, true);
+        }
+/*        while (openConnections.Count> 0 && currPlacedTilesCount < maxTilesToPlace )
         {
             SpawningLoop( ref openTiles, true);
             //yield return new WaitForSeconds ( waitSecAfterSpawn );
-        }
+        }*/
 
 
 
@@ -121,11 +127,16 @@ public class SceneBuilder : MonoBehaviour
 
         if (deadEndTiles.Count>0)
         {
-            while ( openConnections.Count > 0 )
+            Debug.Log("OPenConnection count for deadEnds = " + openConnections.Count);
+            for (int i = 0; i < openConnections.Count; i++)
+            {
+                SpawningLoop ( ref deadEndTiles, false );
+            }
+/*            while ( openConnections.Count > 0 )
             {
                 SpawningLoop ( ref deadEndTiles, false );
                 //yield return new WaitForSeconds ( waitSecAfterSpawn );
-            }
+            }*/
         }
 
 #if UNITY_EDITOR
@@ -139,7 +150,7 @@ public class SceneBuilder : MonoBehaviour
 
     
     [ContextMenu("DestroyChilds")]
-    private void DestroyChilds()
+    public void DestroyChilds()
     {
         while (transform.childCount > 0)
         {
@@ -147,50 +158,6 @@ public class SceneBuilder : MonoBehaviour
         }
     }
 
-    IEnumerator GenRoutine () 
-    {
-        //TilesList = Resources.LoadAll<SceneBuilder_Tile> ( "SceneBuilder" ).ToList();
-
-
-        //Start connections
-	    foreach (TileConnection tileConnection in startTile.connectionsList)
-	    {
-            openConnections.Add ( tileConnection );
-        }
-
-/*	    foreach (SceneBuilder_Tile tile in TilesList)
-	    {
-	        tile.CompoundBounds(tile.gameObject);
-	    }*/
-
-
-
-        //Place all tiles
-	    List<SceneBuilder_Tile> openTiles = TilesList.Where(v => !v.deadEnd).ToList();
-
-
-	    while (openConnections.Count> 0 && currPlacedTilesCount < maxTilesToPlace )
-	    {
-            SpawningLoop( ref openTiles, true);
-            yield return new WaitForSeconds ( waitSecAfterSpawn );
-	    }
-
-
-
-        //close all open connections for placed tiles
-        List<SceneBuilder_Tile> deadEndTiles = TilesList.Where ( v => v.deadEnd ).ToList ( );
-
-        while ( openConnections.Count > 0 )
-        {
-            SpawningLoop ( ref deadEndTiles, false );
-            yield return new WaitForSeconds ( waitSecAfterSpawn );
-        }
-
-
-	    yield return null;
-	}
-    
-    
     
 
 /*    void OnDrawGizmosSelected ()
@@ -208,6 +175,9 @@ public class SceneBuilder : MonoBehaviour
 
     private void SpawningLoop ( ref List<SceneBuilder_Tile> tiles, bool checkConnection )
     {
+        if(openConnections.Count==0) return;
+        
+        
         int randomIndex = Random.Range ( 0, openConnections.Count );
         TileConnection connection = openConnections[randomIndex];
 
@@ -227,6 +197,13 @@ public class SceneBuilder : MonoBehaviour
                 if ( tileConnection.IsOpened ) openConnections.Add ( tileConnection );
             }
         }
+        else if(checkConnection==false)
+        {
+            GameObject deadEndFailedGameObject = new GameObject("Dead_end > type: " + connection.connectionType );
+
+            deadEndFailedGameObject.transform.position = connection.connectionTransf.position;
+            deadEndFailedGameObject.transform.SetParent( transform);
+        }
     }
 
 
@@ -236,13 +213,16 @@ public class SceneBuilder : MonoBehaviour
 
         for ( int i = 0; i < tiles.Count; i++ )
         {
-            SceneBuilder_Tile tileToSpawn = tiles[ /*Random.Range ( 0, tilesList.Count )*/i];
-            tileToSpawn.connectionsList.Shuffle();
+            SceneBuilder_Tile tileToSpawn = tiles[ i];
+            List<TileConnection> connectionsList = tileToSpawn.connectionsList.Where(v=>v.connectionType == spawnConnection.connectionType).ToList();
+            if(connectionsList.Count==0) continue;
+            
+            connectionsList.Shuffle();
 
-            for ( int j = 0; j < tileToSpawn.connectionsList.Count; j++ )
+            for ( int j = 0; j < connectionsList.Count; j++ )
             {
                 //int randomConnectIndex = j;//Random.Range ( 0, tileToSpawn.connectionsList.Count );
-                TileConnection tileConnection = tileToSpawn.connectionsList [ j ];
+                TileConnection tileConnection = connectionsList [ j ];
 
                 if ( tileConnection != null )
                 {
@@ -250,17 +230,25 @@ public class SceneBuilder : MonoBehaviour
                                      tileConnection.connectionTransf.root.rotation;
                     rot = ( spawnConnection.connectionTransf.rotation * Quaternion.Euler ( 0, 180, 0 ) ) * rot;
 
-                    Vector3 pos = tileConnection.InverseCoonectionPos ( spawnConnection.connectionTransf.position,
-                        /*spawnConnection.connectionTransf.rotation*/rot );
+                    Vector3 pos = tileConnection.InverseCoonectionPos ( spawnConnection.connectionTransf.position, rot );
 
-                    tileConnection.IsOpened = false;
+                    
+                    //отразить вращение блока если он перевернут вверх ногами
+                    /*if (Vector3.Angle(rot * Vector3.up, Vector3.down) < 20)
+                    {
+                        //rot = Quaternion.Euler(rot.eulerAngles.x, -rot.eulerAngles.y, rot.eulerAngles.z);
+                        rot *= Quaternion.Euler(0,0,180);
+                        Debug.DrawRay(pos, Vector3.up*50, Color.red, 20);
+                    }*/
+                    
+                    //tileConnection.IsOpened = false;
                     
 
                     bool checkSpawnAreaIsClear = true;
                     if (checkConnection)
                     {
                         checkSpawnAreaIsClear = CheckSpawnAreaIsClear (
-                            tileToSpawn.bounds.size,
+                            tileToSpawn.Bounds.size,
                             spawnConnection.connectionTransf,
                             spawnConnection.connectionTransf.InverseTransformPoint ( pos ),
                             pos
@@ -270,6 +258,8 @@ public class SceneBuilder : MonoBehaviour
                     if ( checkSpawnAreaIsClear)
                     {
                         Transform gp = null;
+
+                        #region SPAWN
 
                         if (Application.isPlaying)
                         {
@@ -286,19 +276,26 @@ public class SceneBuilder : MonoBehaviour
                             }
 #endif
                         }
+
+                        #endregion
                         
                         
                         if ( gp != null )
                         {
-                            SceneBuilder_Tile tile = gp.GetComponent<SceneBuilder_Tile> ( );
-                            if ( tile.connectionsList.Count > j )
+                            SceneBuilder_Tile spawnedTile = gp.GetComponent<SceneBuilder_Tile> ( );
+                            //if ( spawnedTile.connectionsList.Count > j )
                             {
-                                var connection = tile.connectionsList[j];
+                                var connection = spawnedTile.connectionsList.OrderBy(v =>
+                                    Vector3.Distance(v.connectionTransf.position,
+                                        spawnConnection.connectionTransf.position)).First();//spawnedTile.connectionsList[j];
                                 connection.CloseConnection ( spawnConnection );
+
+                                spawnedTile.CompoundBounds(spawnedTile.gameObject);
+                                spawnedBounds.Add(spawnedTile.Bounds );
 
                             }
 
-                            return tile;
+                            return spawnedTile;
                         }
                     }
 
@@ -326,9 +323,28 @@ public class SceneBuilder : MonoBehaviour
         Vector3 castPos = Vector3.zero;
         //centerShift = Vector3.ClampMagnitude(centerShift, Mathf.Abs(centerShift.magnitude) - radius/2);
 
-        bool retVal = true;
+        //Debug.DrawRay ( rootConnect.position, Vector3.down * 50, Color.red, /*waitSecAfterSpawn*/10, false );
 
-        for ( int i = 0; i < size.x / radius; i++ )
+        rootConnect.localScale = Vector3.one;
+        
+        bool retVal = true;
+        
+        castPos = rootConnect.TransformPoint (  centerShift );
+        //Debug.DrawRay (  castPos , Vector3.down * heightShift.y, Color.red, 20, false );
+
+/*        if (Physics.BoxCast(castPos, size / 2, Vector3.down))
+        {
+            retVal = false;
+        }*/
+
+        Bounds checkBounds = new Bounds(castPos, rootConnect.rotation * size * 2);
+
+        if (spawnedBounds.Any(v => v.Intersects(checkBounds)))
+        {
+            retVal = false;
+        }
+
+/*        for ( int i = 0; i < size.x / radius; i++ )
         {
             for ( int j = 0; j < size.z / radius; j++ )
             {
@@ -338,7 +354,7 @@ public class SceneBuilder : MonoBehaviour
                 castPos = rootConnect.TransformPoint (  centerShift + currShift );
                 castPos.y = spawnPos.y;//rootConnect.position.y;
 
-                Debug.DrawRay ( ( castPos + heightShift ), Vector3.down * heightShift.y, Color.red, waitSecAfterSpawn, false );
+                Debug.DrawRay ( ( castPos + heightShift ), Vector3.down * heightShift.y, Color.red, /*waitSecAfterSpawn#1#20, false );
 
                 if ( Physics.Raycast ( castPos + heightShift, Vector3.down, out hit, heightShift.y+0.5f ) )
                 {
@@ -349,9 +365,35 @@ public class SceneBuilder : MonoBehaviour
             currShift.z = -size.z / 2;
             currShift.x += radius;
 
-        }
+        }*/
 
 
         return retVal;
     }
 }
+
+
+
+#if UNITY_EDITOR
+[CustomEditor ( typeof ( SceneBuilder ) )]
+[CanEditMultipleObjects]
+public class SceneBuilder_Editor : Editor
+{
+    public override void OnInspectorGUI ()
+    {
+        DrawDefaultInspector ( );
+
+        if ( GUILayout.Button ( "Generate" ) )
+        {
+            SceneBuilder sceneBuilder = (SceneBuilder)target;
+            sceneBuilder.Generate();
+        }
+        if ( GUILayout.Button ( "DestroyChilds" ) )
+        {
+            SceneBuilder sceneBuilder = (SceneBuilder)target;
+            sceneBuilder.DestroyChilds();
+        }
+
+    }
+}
+#endif
