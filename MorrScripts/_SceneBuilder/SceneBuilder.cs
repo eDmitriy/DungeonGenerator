@@ -2,18 +2,20 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using ProceduralToolkit;
 using UnityEngine;
 using Random = UnityEngine.Random;
+
 #if UNITY_EDITOR
 using UnityEditor;
 using UnityEditor.SceneManagement;
 #endif
 
+
 //[ExecuteInEditMode]
 public class SceneBuilder : MonoBehaviour 
 {
-
     #region Vars
 
 /*    [Serializable]
@@ -27,16 +29,25 @@ public class SceneBuilder : MonoBehaviour
     public List<SceneBuilder_Tile/*_WithRatio*/> tilesList_withRatio = new List<SceneBuilder_Tile/*_WithRatio*/>();
     private List<SceneBuilder_Tile> tilesList = new List<SceneBuilder_Tile>();
 
-    public float waitSecAfterSpawn = 0.1f;
+    //public float waitSecAfterSpawn = 0.1f;
 
     public int maxTilesToPlace = 10;
-    private int currPlacedTilesCount = 0;
+    public int currPlacedTilesCount = 0;
+    public int coridorsRatioMult = 10;
+
 
     public SceneBuilder_Tile startTile;
     public bool generateOnStart = false;
 
     public List<TileConnection> openConnections = new List<TileConnection>();
-    List<Bounds> spawnedBounds = new List<Bounds>();
+
+
+    public class BoundsWithObject
+    {
+        public Bounds bounds;
+        public GameObject gameObject;
+    }
+    List<BoundsWithObject> spawnedBounds = new List<BoundsWithObject>();
     
     
     public List<SceneBuilder_Tile> TilesList
@@ -65,23 +76,34 @@ public class SceneBuilder : MonoBehaviour
             Generate();
         }
     }
-    
 
-    
+
+
+    #region Generation
+
     [ContextMenu("Generate")]
     public void Generate()
     {
-        DestroyChilds();
-        
+        var startTime = DateTime.Now;
         
         #region Init data
-
+        
+        ClearConsole();
+        DestroyChilds();
+        ClearSpawnedBounds();
         TilesList.Clear();
         spawnedBounds.Clear();
         
+        startTile.CompoundBounds();
+        spawnedBounds.Add( new BoundsWithObject(){bounds = startTile.Bounds, gameObject = startTile.gameObject} );
+        
+        
         foreach (var tile in tilesList_withRatio)
         {
-            for (int i = 0; i < tile.spawnRatio; i++)
+            int tileSpawnRatio = tile.spawnRatio;
+            if (tile.isCoridor) tileSpawnRatio *= coridorsRatioMult;
+            
+            for (int i = 0; i < tileSpawnRatio; i++)
             {
                 TilesList.Add(tile);
             }
@@ -100,13 +122,14 @@ public class SceneBuilder : MonoBehaviour
 
         foreach (SceneBuilder_Tile tile in TilesList)
         {
-            tile.CompoundBounds(tile.gameObject);
+            tile.CompoundBounds();
         }
 
         #endregion
 
 
-        //Place all tiles
+        #region PlaceTiles
+
         List<SceneBuilder_Tile> openTiles = TilesList.Where(v => !v.deadEnd).ToList();
 
 
@@ -114,30 +137,30 @@ public class SceneBuilder : MonoBehaviour
         {
             SpawningLoop( ref openTiles, true);
         }
-/*        while (openConnections.Count> 0 && currPlacedTilesCount < maxTilesToPlace )
-        {
-            SpawningLoop( ref openTiles, true);
-            //yield return new WaitForSeconds ( waitSecAfterSpawn );
-        }*/
 
-
+        #endregion
 
         //close all open connections for placed tiles
+        #region DeadEnds
+
         List<SceneBuilder_Tile> deadEndTiles = TilesList.Where ( v => v.deadEnd ).ToList ( );
 
         if (deadEndTiles.Count>0)
         {
             Debug.Log("OPenConnection count for deadEnds = " + openConnections.Count);
-            for (int i = 0; i < openConnections.Count; i++)
+
+            var openConnectionsCount = openConnections.Count;
+            for (int i = 0; i < openConnectionsCount; i++)
             {
                 SpawningLoop ( ref deadEndTiles, false );
             }
-/*            while ( openConnections.Count > 0 )
-            {
-                SpawningLoop ( ref deadEndTiles, false );
-                //yield return new WaitForSeconds ( waitSecAfterSpawn );
-            }*/
+
         }
+
+        #endregion
+
+        
+        #region MarkSCeneDirty
 
 #if UNITY_EDITOR
         if (Application.isPlaying==false)
@@ -146,32 +169,14 @@ public class SceneBuilder : MonoBehaviour
             EditorSceneManager.MarkSceneDirty(gameObject.scene);
         }
 #endif
+
+        #endregion
+        
+        Debug.Log( "GenerationTime = " + (DateTime.Now - startTime).TotalSeconds );
     }
 
-    
-    [ContextMenu("DestroyChilds")]
-    public void DestroyChilds()
-    {
-        while (transform.childCount > 0)
-        {
-            DestroyImmediate(transform.GetChild(0).gameObject);
-        }
-    }
 
     
-
-/*    void OnDrawGizmosSelected ()
-    {
-        Gizmos.color = new Color ( 1, 0, 0, 0.5F );
-
-        foreach (Bounds b in bounds)
-        {
-            Gizmos.DrawCube ( b.center, b.size );
-
-        }
-    }*/
-
-
 
     private void SpawningLoop ( ref List<SceneBuilder_Tile> tiles, bool checkConnection )
     {
@@ -209,15 +214,51 @@ public class SceneBuilder : MonoBehaviour
 
     private SceneBuilder_Tile SpawnTile(TileConnection spawnConnection, ref List<SceneBuilder_Tile> tiles, bool checkConnection)
     {
+        var spawnConnection_Tile = spawnConnection.connectionTransf.GetComponentInParent<SceneBuilder_Tile>().gameObject;
+        
         tiles.Shuffle ( );
+        List<SceneBuilder_Tile> badTiles = new List<SceneBuilder_Tile>();
 
         for ( int i = 0; i < tiles.Count; i++ )
         {
+            #region Collect connectionsList
+
             SceneBuilder_Tile tileToSpawn = tiles[ i];
+            if(badTiles.Contains(tileToSpawn)) continue; //double check fix
+            if(tileToSpawn.connectionsList.Any(v=>v.connectionType == spawnConnection.connectionType) == false) continue;
+            
+            
             List<TileConnection> connectionsList = tileToSpawn.connectionsList.Where(v=>v.connectionType == spawnConnection.connectionType).ToList();
             if(connectionsList.Count==0) continue;
-            
+
+            if (Vector3.Angle(spawnConnection.connectionTransf.forward, Vector3.up) < 10)
+            {
+                Debug.Log(spawnConnection.connectionType + " IsFlipped", spawnConnection.connectionTransf);
+                
+                connectionsList = connectionsList
+                    .Where(v =>
+                        {
+                            if (v == null || v.connectionTransf == null) return false;
+    
+                            /*var sceneBuilderTile = v.connectionTransf.GetComponentInParent<SceneBuilder_Tile>();
+                            if (sceneBuilderTile == null) return false;*/
+                            
+                            //return  Vector3.Angle( sceneBuilderTile.transform.up, Vector3.down ) < 10;
+                            return  Vector3.Angle( v.connectionTransf.forward, spawnConnection.connectionTransf.forward ) > 90;
+
+                        }
+                    )
+                    .ToList();
+                
+                Debug.Log("FlippedTile availableConnections count =" + connectionsList.Count());
+            }
+            if(connectionsList.Count==0) continue;
+
             connectionsList.Shuffle();
+
+            #endregion
+            
+            
 
             for ( int j = 0; j < connectionsList.Count; j++ )
             {
@@ -234,69 +275,58 @@ public class SceneBuilder : MonoBehaviour
 
                     
                     //отразить вращение блока если он перевернут вверх ногами
-                    /*if (Vector3.Angle(rot * Vector3.up, Vector3.down) < 20)
+                    if (Vector3.Angle(/*rot * Vector3.up*/spawnConnection.connectionTransf.up, Vector3.down) < 20)
                     {
                         //rot = Quaternion.Euler(rot.eulerAngles.x, -rot.eulerAngles.y, rot.eulerAngles.z);
                         rot *= Quaternion.Euler(0,0,180);
-                        Debug.DrawRay(pos, Vector3.up*50, Color.red, 20);
-                    }*/
+                        //Debug.DrawRay(pos, Vector3.up*500, Color.red, 20);
+                        Debug.Log(spawnConnection.connectionTransf.name + " FLIP");
+                    }
                     
-                    //tileConnection.IsOpened = false;
-                    
+                   
 
                     bool checkSpawnAreaIsClear = true;
                     if (checkConnection)
                     {
-                        checkSpawnAreaIsClear = CheckSpawnAreaIsClear (
-                            tileToSpawn.Bounds.size,
-                            spawnConnection.connectionTransf,
-                            spawnConnection.connectionTransf.InverseTransformPoint ( pos ),
-                            pos
-                        );
+                        checkSpawnAreaIsClear = CheckSpawnAreaIsClear_WithSpawn(tileToSpawn, pos, rot, spawnConnection_Tile);
                     }
                     
                     if ( checkSpawnAreaIsClear)
                     {
-                        Transform gp = null;
+                        var gp = SpawnTile(tileToSpawn, pos, rot);
 
-                        #region SPAWN
 
-                        if (Application.isPlaying)
-                        {
-                            gp = Instantiate ( tileToSpawn.transform, pos, rot ) as Transform;
-                        }
-                        else
-                        {
-#if UNITY_EDITOR
-                            gp = PrefabUtility.InstantiatePrefab(tileToSpawn.transform, transform) as Transform;
-                            if (gp != null)
-                            {
-                                gp.transform.position = pos;
-                                gp.transform.rotation = rot;
-                            }
-#endif
-                        }
-
-                        #endregion
-                        
-                        
                         if ( gp != null )
                         {
                             SceneBuilder_Tile spawnedTile = gp.GetComponent<SceneBuilder_Tile> ( );
-                            //if ( spawnedTile.connectionsList.Count > j )
+                            
+                            spawnedTile.CompoundBounds();
+                            spawnedTile.Bounds.size -= Vector3.one * 3; //*= 0.8f;
+                            spawnedBounds.Add( new BoundsWithObject(){bounds = spawnedTile.Bounds, gameObject = spawnedTile.gameObject} );
+                            
+                            
+                            var openTileConnections = spawnedTile.connectionsList.Where(v=>v.IsOpened).ToList();
+                            if ( /*spawnedTile.connectionsList.Count > j*/ openTileConnections.Count>0)
                             {
-                                var connection = spawnedTile.connectionsList.OrderBy(v =>
-                                    Vector3.Distance(v.connectionTransf.position,
-                                        spawnConnection.connectionTransf.position)).First();//spawnedTile.connectionsList[j];
+                                var connection = /*spawnedTile.connectionsList.Where(v=>v.IsOpened)*/
+                                    openTileConnections.OrderBy(v =>
+                                        Vector3.Distance(v.connectionTransf.position,
+                                            spawnConnection.connectionTransf.position)).First();//spawnedTile.connectionsList[j];
                                 connection.CloseConnection ( spawnConnection );
-
-                                spawnedTile.CompoundBounds(spawnedTile.gameObject);
-                                spawnedBounds.Add(spawnedTile.Bounds );
-
+                                spawnConnection.CloseConnection(connection);
+                                //spawnConnection.IsOpened = false;
                             }
 
+                            if (tileToSpawn.isUnique)
+                            {
+                                TilesList.Remove(tileToSpawn);
+                            }
                             return spawnedTile;
                         }
+                    }
+                    else
+                    {
+                        badTiles.Add( tileToSpawn);
                     }
 
 
@@ -305,71 +335,228 @@ public class SceneBuilder : MonoBehaviour
 
 
         }
-
+        Debug.Log("No fitting connections ", spawnConnection.connectionTransf);
+        //spawnConnection.CloseConnection(/*spawnConnection*/null); //this will prevent deadEnd spawning
+        
+        
         return null;
     }
 
 
-    private bool CheckSpawnAreaIsClear(Vector3 size, Transform rootConnect, Vector3 centerShift, Vector3 spawnPos)
+
+    private Transform SpawnTile(SceneBuilder_Tile tileToSpawn, Vector3 pos, Quaternion rot)
     {
-        //return bounds.Any(b => !b.Intersects(bound) );
+        Transform gp = null;
 
-        //float step = 2;
-        const float radius = 2;
-        RaycastHit hit;
-        Vector3 currShift = -size/2;
-        //currShift.y = 0;
-        Vector3 heightShift = Vector3.up*(size.y /*- radius/2*/);
+        #region SPAWN
+
+        if (Application.isPlaying)
+        {
+            gp = Instantiate(tileToSpawn.transform, pos, rot) as Transform;
+        }
+        else
+        {
+#if UNITY_EDITOR
+            gp = PrefabUtility.InstantiatePrefab(tileToSpawn.transform, transform) as Transform;
+            if (gp != null)
+            {
+                gp.transform.position = pos;
+                gp.transform.rotation = rot;
+            }
+#endif
+        }
+
+        #endregion
+
+        return gp;
+    }
+
+    #endregion
+    
+
+
+    #region CheckSPawnArea
+
+    private List<Bounds> checkBoundsList = new List<Bounds>();
+    private bool CheckSpawnAreaIsClear(Vector3 size, Transform rootConnect, Vector3 centerShift, Vector3 boundCenterShift, Quaternion rot/*, Vector3 spawnPos*/)
+    {
         Vector3 castPos = Vector3.zero;
-        //centerShift = Vector3.ClampMagnitude(centerShift, Mathf.Abs(centerShift.magnitude) - radius/2);
-
-        //Debug.DrawRay ( rootConnect.position, Vector3.down * 50, Color.red, /*waitSecAfterSpawn*/10, false );
-
         rootConnect.localScale = Vector3.one;
+
+        centerShift = rot * centerShift;
+        centerShift.x = 0;
+        //centerShift.z *= 1.5f;
+        
         
         bool retVal = true;
         
-        castPos = rootConnect.TransformPoint (  centerShift );
-        //Debug.DrawRay (  castPos , Vector3.down * heightShift.y, Color.red, 20, false );
+        castPos = rootConnect.TransformPoint (  centerShift ) - boundCenterShift;
+        Debug.DrawRay (  castPos , Vector3.down * 50, Color.magenta, 20, false );
 
-/*        if (Physics.BoxCast(castPos, size / 2, Vector3.down))
-        {
-            retVal = false;
-        }*/
+        var connectionRootGO = rootConnect.GetComponentInParent<SceneBuilder_Tile>().gameObject;
+        if (connectionRootGO == null) return false;
+        
+        
+        var checkBounds = new Bounds(castPos, rot * size  );
 
-        Bounds checkBounds = new Bounds(castPos, rootConnect.rotation * size * 2);
-
-        if (spawnedBounds.Any(v => v.Intersects(checkBounds)))
-        {
-            retVal = false;
-        }
-
-/*        for ( int i = 0; i < size.x / radius; i++ )
-        {
-            for ( int j = 0; j < size.z / radius; j++ )
+        
+        if (spawnedBounds.Any(v =>
             {
-                currShift.x = Mathf.Clamp ( currShift.x, -( size.x / 2 ) + radius/4, ( size.x / 2 ) - radius/4 );
-                currShift.z = Mathf.Clamp ( currShift.z, -( size.z / 2 ) + radius/4, ( size.z / 2 ) - radius/4 );
-
-                castPos = rootConnect.TransformPoint (  centerShift + currShift );
-                castPos.y = spawnPos.y;//rootConnect.position.y;
-
-                Debug.DrawRay ( ( castPos + heightShift ), Vector3.down * heightShift.y, Color.red, /*waitSecAfterSpawn#1#20, false );
-
-                if ( Physics.Raycast ( castPos + heightShift, Vector3.down, out hit, heightShift.y+0.5f ) )
-                {
-                    retVal = false;
-                }
-                currShift.z += radius;
-            }
-            currShift.z = -size.z / 2;
-            currShift.x += radius;
-
-        }*/
-
+                if ( connectionRootGO == v.gameObject ) return false;
+                
+                return v.bounds.Intersects(checkBounds);
+            })
+        )
+        {
+            retVal = false;
+            //Debug.DrawRay (  castPos , Vector3.up * 30, Color.red, 20, false );
+        }
+        
+        if(retVal==true) checkBoundsList.Add(checkBounds);
 
         return retVal;
     }
+    
+    private bool CheckSpawnAreaIsClear_WithSpawn(SceneBuilder_Tile tileToSpawn, Vector3 pos, Quaternion rot, GameObject spawnConnection_Tile)
+    {
+        bool checkSpawnAreaIsClear = true;
+        
+/*                        checkSpawnAreaIsClear = CheckSpawnAreaIsClear (
+                            tileToSpawn.Bounds.size,
+                            spawnConnection.connectionTransf,
+                            //pos/*spawnConnection.connectionTransf.InverseTransformPoint ( pos )#1#/*,
+                            tileConnection.InverseCoonectionPos ( tileToSpawn.Bounds.center/*spawnConnection.connectionTransf.position#1#, rot )
+                            //pos
+                            ,tileToSpawn.Bounds.center - tileConnection.connectionTransf.position
+                            //spawnConnection.connectionTransf.InverseTransformPoint( tileToSpawn.Bounds.center )
+                            ,rot
+                        );*/
+
+
+        var spawnedTile = SpawnTile(tileToSpawn, pos, rot);
+        SceneBuilder_Tile spawnedTile_comp = spawnedTile.GetComponent<SceneBuilder_Tile>();
+
+        spawnedTile_comp.CompoundBounds();
+        Bounds bounds = spawnedTile_comp.Bounds;
+        bounds.size -= Vector3.one*3;
+
+
+        if (spawnedBounds.Any(v =>
+            {
+                if (spawnConnection_Tile == v.gameObject) return false;
+
+                return v.bounds.Intersects(bounds);
+            })
+        )
+        {
+            checkSpawnAreaIsClear = false;
+            //Debug.DrawRay (  castPos , Vector3.up * 30, Color.red, 20, false );
+        }
+
+        //if (checkSpawnAreaIsClear == true)
+        {
+            checkBoundsList.Add(bounds);
+        }
+
+        DestroyImmediate(spawnedTile.gameObject);
+        return checkSpawnAreaIsClear;
+    }
+
+    #endregion
+
+
+
+    #region Utils
+    
+    
+    public bool drawGizmos = true;
+    public bool drawGizmos_spawnCheckBounds = true;
+
+    void OnDrawGizmos/*Selected*/ ()
+    {
+        if (drawGizmos)
+        {
+
+            Gizmos.color = new Color(1, 0, 0, 0.5F);
+
+            foreach (var b in spawnedBounds)
+            {
+                var bb = b.bounds;
+                Gizmos.DrawCube(bb.center, bb.size);
+            }
+        }
+
+
+        //last check bounds
+        if (drawGizmos_spawnCheckBounds)
+        {
+            Gizmos.color = new Color ( 1, 1, 0, 0.15F );
+            
+            foreach (Bounds b in checkBoundsList)
+            {
+                //Gizmos.color = new Color ( Random.Range(0f, 1f), Random.Range(0f, 1f), Random.Range(0f, 1f), 0.5F );
+                //Gizmos.DrawCube ( b.center, b.size );
+                Gizmos.DrawWireCube( b.center, b.size );
+
+            }
+        }
+
+    }
+    
+    
+
+    [ContextMenu("DestroyChilds")]
+    public void DestroyChilds()
+    {
+        while (transform.childCount > 0)
+        {
+            DestroyImmediate(transform.GetChild(0).gameObject);
+        }
+    }
+
+    public void ClearSpawnedBounds()
+    {
+        spawnedBounds.Clear();
+        checkBoundsList.Clear();
+    }
+    
+    
+    
+
+    #region ClearCosoleLog
+
+    [ContextMenu("ClearConsole")]
+    void ClearConsole()
+    {
+#if UNITY_EDITOR
+        if (Application.isPlaying == false)
+        {
+            //Console.Clear();
+            //Debug.ClearDeveloperConsole();
+            ClearLog();
+        }
+#endif
+    }
+#if UNITY_EDITOR
+    void ClearLog()
+    {
+        var assembly = Assembly.GetAssembly(typeof(Editor));
+        if (assembly != null)
+        {
+            var type = assembly.GetType("UnityEditor.LogEntries");
+            var method = type.GetMethod("Clear");
+            if (method != null)
+            {
+                method.Invoke(new object(), null);
+            }
+        }
+    }
+#endif
+
+#endregion
+
+    #endregion
+
 }
 
 
@@ -392,6 +579,8 @@ public class SceneBuilder_Editor : Editor
         {
             SceneBuilder sceneBuilder = (SceneBuilder)target;
             sceneBuilder.DestroyChilds();
+            sceneBuilder.ClearSpawnedBounds();
+            sceneBuilder.currPlacedTilesCount = 0;
         }
 
     }

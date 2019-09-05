@@ -13,11 +13,14 @@ public class SceneBuilder_Tile : MonoBehaviour
 {
     public int spawnRatio = 1;
     public bool deadEnd = false;
+    public bool isUnique = false;
+    public bool isCoridor = false;
+
 
     //public static List<SceneBuilder_Tile> tylesList = new List<SceneBuilder_Tile>(); 
 
     public List<TileConnection> connectionsList = new List<TileConnection>(){new TileConnection(), new TileConnection()};
-    public Bounds Bounds { get; set; }
+    public Bounds Bounds; /*{ get; set; }*/
 
 
     // Use this for initialization
@@ -34,29 +37,36 @@ public class SceneBuilder_Tile : MonoBehaviour
                 Debug.DrawLine ( connection.connectionTransf.position, connection.linkedToTransf.position, Color.yellow );
         }
     }*/
-/*    void OnDrawGizmosSelected ()
+    void OnDrawGizmosSelected ()
     {
-        Gizmos.color = new Color ( 1, 0, 0, 0.5F );
-        Gizmos.DrawCube ( bounds.center, bounds.size );
-    }*/
+        Gizmos.color = new Color ( 0, 0, 1, 0.5F );
+        Gizmos.DrawCube ( Bounds.center, Bounds.size );
+    }
 
 
 
+    public void CompoundBounds()
+    {
+        CompoundBounds(gameObject);
+    }
 
     public void CompoundBounds ( GameObject go )
     {
 
-        Bounds = new Bounds ( );
-        Renderer[] renderers = go.GetComponentsInChildren<Renderer> ( );
+        Bounds = new Bounds (go.transform.position, Vector3.zero );
+        var renderers = go.GetComponentsInChildren<MeshRenderer> (false );
 
-        foreach ( Renderer renderer1 in renderers )
+        foreach ( var renderer1 in renderers )
         {
-            if ( Bounds.extents == Vector3.zero )
+/*            if ( Bounds.extents == Vector3.zero )
             {
                 Bounds = renderer1.bounds;
                 continue;
-            }
+            }*/
 
+            //if(renderer1.transform.position.sqrMagnitude < 1) continue;
+            
+            
             Bounds.Encapsulate ( renderer1.bounds );
         }
 
@@ -109,9 +119,12 @@ public class TileConnection
     public void CloseConnection ( TileConnection link )
     {
         IsOpened = false;
-        link.IsOpened = false;
-        LinkedToTransf = link.connectionTransf;
-        link.LinkedToTransf = connectionTransf;
+        if (link != null)
+        {
+            link.IsOpened = false;
+            LinkedToTransf = link.connectionTransf;
+            link.LinkedToTransf = connectionTransf;
+        }
     }
 
     public Vector3 InverseCoonectionPos (Vector3 pos, Quaternion rot)
@@ -143,15 +156,15 @@ public class SceneBuilder_Tile_Editor : Editor
         DrawDefaultInspector ( );
 
         //CityGen_TileSpawner myScript = (CityGen_TileSpawner)target;
-/*        if ( GUILayout.Button ( "Calc Bounds" ) )
+        if ( GUILayout.Button ( "Calc Bounds" ) )
         {
             //myScript.Spawn();
             foreach ( var targ in targets )
             {
                 SceneBuilder_Tile obj = ( (SceneBuilder_Tile)targ );
-                if ( obj != null ) obj.CompoundBounds ( obj.gameObject );
+                if ( obj != null ) obj.CompoundBounds ( );
             }
-        }*/
+        }
 
     }
 }
