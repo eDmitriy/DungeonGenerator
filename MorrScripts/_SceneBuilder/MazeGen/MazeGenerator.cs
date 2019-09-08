@@ -2,9 +2,11 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using ProceduralToolkit;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.UI;
 using Random = UnityEngine.Random;
 
 
@@ -20,15 +22,89 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
 
     public bool genOnStart = false;
 
+    
+    [Serializable]
+    public class DrawPathLinksSettings
+    {
+       public bool draw = true;
+       public bool onlyUpDown = false;
+       [Range(-1, 200)]
+       public int floor = -1;
+       public int floorRange = 10;
+       public float floorRangePow = 5;
+       public int maxFloor = 1;
 
+       
+       public float linkShift = 0.1f;
+
+       public bool animateFloors = false;
+       public float floorAnimationCounter = 0;
+       public float floorAnimationCounter_triggerValue = 0;
+       
+       public Color defaultLinksColor = new Color(1,1,0, 0.1f);
+       public Color floorColor = Color.cyan;
+
+       public Slider floorSlider;
+       
+       public int Floor
+       {
+           get { return floor; }
+           set
+           {
+               floor = value;
+               
+               if (floorSlider != null)
+               {
+                   floorSlider.maxValue = MaxFloor;
+                   floorSlider.value = floor;
+               }
+           }
+       }
+
+       public int MaxFloor
+       {
+           get { return maxFloor; }
+           set
+           {
+               maxFloor = value;
+               Floor = floor;
+           }
+       }
+    }
     [Header("grid")] 
-    public bool drawPathLinks = true;
+    public DrawPathLinksSettings drawPathLinksSettings = new DrawPathLinksSettings();
 
     public Vector3 gridSize = new Vector3(50,50,50);
     public int stepDist = 20;
 
+    [Header("Path Noise")] 
     public int pathNoiseCount = 10;
 
+
+    #region Path Grow
+
+    [Serializable]
+    public class PathGrowSettings
+    {
+        public int pathGrowBranchesCount = 40;
+        public int pathGrowMaxCount = 30;
+        //public int pathGrow_upDownLinkRemoveChance = 90;
+        public int pathGrow_sameDirectionMult = 5;
+        public int pathGrow_verticalMult = 20;
+
+        public float nextNodeSelection_onePlaneChance = 90;
+        public float nextNodeSelection_useVectorSortingChance = 50;
+
+        public float inserSignatureChance = 20;
+        
+    }
+    [Header("Path Grow")] 
+    public PathGrowSettings pathGrowSettings = new PathGrowSettings();
+
+    #endregion
+
+
+    //public Transform startNodeTr, endNodeTr;
     Node startNode, endNode,  pathStartNode, pathEndNode;
     public Transform startPoint;
 
@@ -42,7 +118,8 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
 
 
     //[HideInInspector] 
-    public List<Node> nodeList { get; set; } = new List<Node>();
+    //private List<Node> nodeList { get; set; } = new List<Node>();
+    private Dictionary<Vector3Int, Node> nodeDict = new Dictionary<Vector3Int, Node>();
 
     [HideInInspector]
     public List<PathNode> pathToTarget = new List<PathNode> ( );
@@ -92,24 +169,165 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
             BuildPathPointsForSignatureCheck ( );
             ScanSigantures ( );
         }
+        var drS = drawPathLinksSettings;
+        drS.MaxFloor = (int)(gridSize.y / stepDist);
+        SetFloor(0);
     }
 
 
-    private string pathToSignaturesLast = "";
+    public void Update()
+    {
+        //CalcCurrPointerPosition();
+
+        DrawPathLinks();
+
+        
+        
+        if (Input.GetKeyDown(KeyCode.G) && Input.GetKeyDown(KeyCode.R))
+        {
+            BuildPathPointsForSignatureCheck();
+        }
+    }
+
     
+    private void OnGUI()
+    {
+        GUILayout.BeginVertical();
+        
+        GUILayout.Label(currGridBrushPointerPos.ToString());
+        
+        GUILayout.EndVertical();
+    }
+
+
+
+    public void SetFloor(float val)
+    {
+        drawPathLinksSettings.floor = (int)val;
+        //DrawPathLinks();
+    }
+    
+    public void DrawPathLinks()
+    {
+        var drS = drawPathLinksSettings;
+//        drS.MaxFloor = (int)(gridSize.y / stepDist);
+        
+        if ( !drS.draw && pathToTarget != null && pathToTarget .Count>1) return;
+
+        if (drS.animateFloors)
+        {
+            drS.floorAnimationCounter++;
+            if (drS.floorAnimationCounter >= drS.floorAnimationCounter_triggerValue)
+            {
+                drS.floorAnimationCounter = 0;
+                drS.Floor++;
+                if (drS.Floor > drS.MaxFloor)
+                {
+                    drS.Floor = 0;
+                }
+            }
+        }
+
+
+/*        foreach (var n in nodeDict.Values)
+        {
+            if (n.hasPreinserted)
+            {
+                Color color = Color.blue;
+
+                Debug.DrawRay (
+                    n.worldPos,
+                    Vector3.up*3, 
+                    color
+                );
+            }
+        }*/
+        
+        
+        
+        foreach ( var pathNode in pathToTarget)
+        {
+/*            Debug.DrawRay(
+                pathNode.node.worldPos ,
+                    Quaternion.Euler(0, Random.Range(0,350), 0) * Vector3.one*50
+            );*/
+            if (pathNode == null || pathNode.node == null) continue;
+            
+
+            Color color = pathNode.node.hasPreinserted ? Color.blue : new Color(1,1,0,0.5f);
+
+/*            //if (drS.drawPathLinks_onlyUpDown==false)
+            {
+                Debug.DrawRay (
+                    pathNode.node.worldPos,
+                    Vector3.up*3, 
+                    color
+                );
+            }*/
+
+
+            float shift = drS.linkShift;//0.1f;
+            foreach ( var link in pathNode.links )
+            {
+                if(link==null || link.node==null) continue;
+
+                color = drS.defaultLinksColor;//new Color(1,1,0,0.05f);
+
+                
+                if(drS.onlyUpDown && Vector3.Angle( link.node.worldPos - pathNode.node.worldPos, Vector3.up) > 11 ) continue;
+                int floorDiff = (drS.Floor - (int)pathNode.node.vectorPos.y);
+                float drawShift_floorMult = 1;
+                if(drS.Floor>-1 && floorDiff>-1 && floorDiff < drS.floorRange)
+                {
+                    float lerp = Mathf.Lerp(0f, 1f, ((float)drS.floorRange-floorDiff)/(float)drS.floorRange);
+                    lerp = Mathf.Pow(lerp, drS.floorRangePow);
+                    color = Color.Lerp(color, drS.floorColor, lerp); //new Color(1,1,0.5f,/*0.99f*/ lerp);
+                    drawShift_floorMult = 5;
+                }
+
+                if (drS.Floor < 0)
+                {
+                    color.a = 0.5f;
+                }
+                
+                
+
+                Debug.DrawLine (
+                    pathNode.node.worldPos + Vector3.one * Random.Range ( -shift*drawShift_floorMult, shift*drawShift_floorMult ),
+                    link.node.worldPos + Vector3.one * Random.Range ( -shift*drawShift_floorMult, shift*drawShift_floorMult ),
+                    color, 0.1f, false
+                );
+            }
+        }
+    }
+
+
+
+    
+    #endregion
+
+
+
+
+
+
+    #region MazeGen
+
+    private string pathToSignaturesLast = "";
     [ContextMenu("Generate path nodes")]
     public void BuildPathPointsForSignatureCheck()
     {
-        if (signatures.Count == 0 || pathToSignaturesLast != pathToSignatures)
+        DateTime startTime = DateTime.Now;
+        
+/*
+        
+        if (/*signatures.Count == 0 || pathToSignaturesLast != pathToSignatures#1#loadReses && drawingGridBrushNow==false)
         {
             signatures = Resources.LoadAll<TileSignature> ( pathToSignatures ).ToList ( );
             pathToSignaturesLast = pathToSignatures;
-        }
+        }*/
 
         CleanSpawned(true);
-
-
-
 
         GenerateGrid ( );
 
@@ -121,44 +339,88 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
             if ( startNode != null ) pathStartNode = startNode;
         }*/
 
+
         #region SIGNATURE INSERTION
 
         var hG = gridSize.z / stepDist / 2f;
         var insertSignatureStartShift = Vector3.zero;//new Vector3( 0,0, Random.Range( -hG,  hG ));
         InsertSignature(signatureInsertion.signatureToInsert.GetRandom(), insertSignatureStartShift );
 
-        endNode = pointsOfInterest[0];
+        if (pointsOfInterest.Count > 0) endNode = pointsOfInterest[0];
+
         #endregion
-        
-        
-        SetStartEndPoints ( transform.position );
-        pathToTarget.AddRange ( PathFindLoop ( ) );
+
+
+/*        SetStartEndPoints ( transform.position );
+        var pathFindLoopResult = PathFindLoop ( );
+        if (pathFindLoopResult != null) pathToTarget.AddRange(pathFindLoopResult);*/
 
         //pointsOfInterest.Add ( pathToTarget.Last ( ).node );
 
 
+        GrowPath();
         PathNoise ( );
+        CloseOpenPathEnds();
+        ConnectSeparatedPathParts();
+  
 
-        
-        //BuildPathLinks(pathToTarget);
-
-/*        foreach (var pp in pathToTarget)
-        {
-            foreach (var ppLink in pp.links)
-            {
-                ppLink.AddLink(pp);
-            }
-        }*/
-
-
-        //UpdateColorIndication ( );
+        DrawPathLinks();
+        Debug.Log("GenerationFinished. Time: " + (DateTime.Now - startTime).TotalSeconds);
     }
 
-    private void InsertSignature(TileSignature signatureToInsert, Vector3 insertSignatureStartShift)
+    
+    private void ConnectSeparatedPathParts()
     {
-        //TileSignature signatureToInsert = signatureInsertion.signatureToInsert.GetRandom();
-        //insertSignatureStartShift = new Vector3( 0,0, Random.Range( -hG,  hG ));
+        foreach (var pp in pathToTarget)
+        {
+            var duplicatePathNodes = pathToTarget.Where(v => v.node == pp.node && v != pp).ToList();
 
+            foreach (var duplicatePathNode in duplicatePathNodes)
+            {
+                if (duplicatePathNode != null)
+                {
+                    foreach (var ppLink in pp.links)
+                    {
+                        //if (ppLink.node.hasPreinserted == false) continue;
+
+                        if (duplicatePathNode.links.Any(v => v.node == ppLink.node)) continue;
+                        if (Vector3.Distance(ppLink.node.vectorPos, duplicatePathNode.node.vectorPos) > /*stepDist * */1.1f) continue;
+
+                        duplicatePathNode.links.Add(ppLink);
+                    }
+
+                    foreach (var dpLink in duplicatePathNode.links)
+                    {
+                        //if (dpLink.node.hasPreinserted == false) continue;
+
+                        if (duplicatePathNode.links.Any(v => v.node == dpLink.node)) continue;
+                        if (Vector3.Distance(dpLink.node.vectorPos, duplicatePathNode.node.vectorPos) > /*stepDist * */1.1f) continue;
+
+                        pp.links.Add(dpLink);
+                    }
+                }
+            }
+
+            
+            pp.links = pp.links.Where(v =>
+                {
+                    if (Vector3.Distance(pp.node.vectorPos, v.node.vectorPos) < /*stepDist **/ 1.1f)
+                    {
+                        return true;
+                    }
+                    else
+                    {
+                        if (v.node.hasPreinserted == true) return true;
+                    }
+
+                    return false;
+                })
+                .ToList();
+        }
+    }
+
+    private bool InsertSignature(TileSignature signatureToInsert, Vector3 insertSignatureStartShift)
+    {
         PathNode prevNode = null;
         
         if (signatureToInsert != null)
@@ -175,24 +437,37 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
             {
                 var v3 = signatureVectorWithLinks[i];
                 v3 = randRotQ * v3;
-                signatureVectorWithLinks[i] = v3;
+                Vector3 wPos = transform.position + insertSignatureStartShift + v3 * stepDist; //transform.position + (insertSignatureStartShift + v3) * stepDist;
+
+                signatureVectorWithLinks[i] = wPos/*v3*/;
             }
 
-
+            List<Node> nodeList = new List<Node>();
             for (var i = 0; i < signatureVectorWithLinks.Count; i++)
             {
                 Vector3 v3 = signatureVectorWithLinks[i];
-                Vector3 wPos = transform.position + (insertSignatureStartShift + v3) * stepDist;
+                //Debug.DrawRay(v3, Vector3.up*10, Color.magenta, 10);
 
+                Node node = GetNodeByWorldPos( /*wPos*/ v3);
+                if (node == null || node.hasPreinserted  || (i>2 && pathToTarget.Any(v=> v.node==node)) )
+                {
+                    print("TryInsertSignature_NodeAlreadyPreinserted");
+                    return false;
+                }
+                
+                nodeList.Add(node);
+            }
+
+
+            for (var i = 0; i < nodeList.Count; i++)
+            {
                 //Debug.DrawRay(wPos, Vector3.up * 50, Color.magenta, 20);
-
-                Node node = GetNodeByWorldPos(wPos);
-                if(node==null) return;
+                Node node = nodeList[i];
                 
                 //POINTS OF INTERESTS from links
-                if (i == 0 || i == signatureVectorWithLinks.Count - 1)
+                if (i == 0 || i == nodeList.Count - 1)
                 {
-                    pointsOfInterest.Add( node);
+                    //pointsOfInterest.Add( node);
                 }
                 else
                 {
@@ -207,11 +482,32 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
 
                 pathToTarget.Add(pathNode);
             }
+
             
             
+            
+            //additional points => set preinserted
+/*            for (int i = 0; i < signatureToInsert.signatureVector_additionalPoints.Count; i++)
+            {
+                Vector3 v3 = signatureToInsert.signatureVector_additionalPoints[i];
+                v3 = randRotQ * v3;
+
+                Vector3 wPos = transform.position + (insertSignatureStartShift + v3) * stepDist;
+
+                //Debug.DrawRay(wPos, Vector3.up * 50, Color.magenta, 20);
+                Node node = GetNodeByWorldPos(wPos);
+                if (node != null) node.hasPreinserted = true;
+            }*/
+
+            return true;
+
         }
+
+        return false;
     }
 
+    
+    
     [ContextMenu("ScanSignatures")]
     public void ScanSigantures()
     {
@@ -220,162 +516,11 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
         ScanPathForSignature();
     }
 
-
-    public void Update()
-    {
-        //CalcCurrPointerPosition();
-
-        DrawPathLinks();
-    }
-
-    public void DrawPathLinks()
-    {
-        if ( !drawPathLinks && pathToTarget != null && pathToTarget .Count>1) return;
-
-        //EVERY NODE
-/*        foreach (MapNode mapNode in nodeList)
-        {
-            Debug.DrawRay (
-                mapNode.transform.position,
-                Vector3.up * 25,
-                Color.yellow
-            );
-        }*/
-
-
-        foreach ( var pathNode in pathToTarget/*.Select(v=>v.node)*/ )
-        {
-/*            Debug.DrawRay(
-                pathNode.node.worldPos ,
-                    Quaternion.Euler(0, Random.Range(0,350), 0) * Vector3.one*50
-            );*/
-            if (pathNode == null || pathNode.node == null) continue;
-
-            //NOT OCCUPIED TILES
-/*            if ( !pathNode.node.occupiedByTile )
-            {
-                Debug.DrawRay (
-                    pathNode.node.worldPos,
-                    Vector3.up * 200,
-                    Color.red
-                );
-            }*/
-            Color color = pathNode.node.hasPreinserted ? Color.blue : new Color(1,1,0,0.5f);
-
-            Debug.DrawRay (
-                pathNode.node.worldPos,
-                Vector3.up*10, 
-                color
-            );
-            if(pathNode.node.occupiedByTile)
-            {
-                Debug.DrawRay (
-                pathNode.node.worldPos + Vector3.right * 0.2f,
-                Vector3.up*11, 
-                Color.red
-                );
-                
-            }
-
-            float shift = 0.1f;
-            foreach ( var link in pathNode.links )
-            {
-                if(link==null || link.node==null) continue;
-                color = /*pathNode.node.hasPreinserted ? Color.blue : */new Color(1,1,0,0.5f);
-
-                Debug.DrawLine (
-                    pathNode.node.worldPos + Vector3.one * Random.Range ( -shift, shift ),
-                    link.node.worldPos + Vector3.one * Random.Range ( -shift, shift ),
-                    color, 0.1f, false
-                );
-            }
-        }
-    }
-
-
-    [ContextMenu("Clean")]
-    public void CleanSpawned()
-    {
-        CleanSpawned(true);
-    }
-
-    public void CleanSpawned(bool cleanLists)
-    {
-        //CLEAR PREV NODES
-        foreach ( Transform child in transform.GetComponentsInChildren<Transform> (true ) )
-        {
-            if ( child != null && child != transform && child != startPoint ) DestroyImmediate ( child.gameObject );
-        }
-
-
-
-
-        if (cleanLists)
-        {
-            //Destroy unUsed nodes
-/*            if ( nodeList != null && nodeList.Count > 0 )
-            {
-                for ( int i = 0; i < nodeList.Count; i++ )
-                {
-                    if ( nodeList[i] != null )
-                    {
-                        GameObject o = nodeList[i].gameObject;
-                        if ( o != null ) Destroy/*Immediate#1# ( o );
-                    }
-
-                }
-            }*/
-
-
-            if (nodeList != null) nodeList.Clear();
-            if (pathToTarget != null) pathToTarget.Clear();
-            if (pointsOfInterest != null) pointsOfInterest.Clear();
-        }
-    }
-
-
-    
-    [Header("World pos node test")]
-    public Transform wordPOsGizmoTr;
-    
-    [Serializable]
-    public class WorldPosNodeDebug
-    {
-        public Vector3 wPOsNodePos;
-        public List<Vector3> wPOsNodeLinks = new List<Vector3>();
-    }
-    public List<WorldPosNodeDebug> worldPosNodeDebugList = new List<WorldPosNodeDebug>();
-    public void GetNodeByWorldPosGizmo()
-    {
-        worldPosNodeDebugList.Clear();
-        var nodeByWorldPosList = pathToTarget
-            .Where(v => Vector3.Distance(v.node.worldPos, wordPOsGizmoTr.position)<stepDist)
-            .ToList();
-
-        worldPosNodeDebugList = nodeByWorldPosList.Select(v =>
-        {
-            Debug.DrawRay(v.node.worldPos, Vector3.up*20, Color.magenta, 5);
-
-            return new WorldPosNodeDebug()
-                {wPOsNodePos = v.node.worldPos, wPOsNodeLinks = v.links.Select(n => n.node.worldPos).ToList()};
-        }).ToList();
-
-    }
-    
     #endregion
-
-
-    private void OnGUI()
-    {
-        GUILayout.BeginVertical();
-        
-        GUILayout.Label(currGridBrushPointerPos.ToString());
-        
-        GUILayout.EndVertical();
-    }
-
-
-    #region PathGen
+    
+    
+    
+    #region PathGen_Utils
 
     private void UpdateColorIndication ()
     {
@@ -424,7 +569,6 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
     }
 
 
-
     private void GenerateGrid ()
     {
         //float halfGridSizeWorld = ( gridSize.x / 2 );
@@ -437,7 +581,8 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
         Vector3 spawnShift = Vector3.zero;
 
 
-        nodeList = new List<Node> ( );
+        //nodeList = new List<Node> ( );
+        nodeDict = new Dictionary<Vector3Int, Node>();
         pathToTarget = new List<PathNode> ( );
         pointsOfInterest = new List<Node> ( );
 
@@ -460,10 +605,13 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
                     go.transform.position = startPos + spawnShift;*/
 
 
-                    Node node = new Node();// go.AddComponent<Node> ( );
-                    node.worldPos = startPos + spawnShift;
-                    node.vectorPos = new Vector3 ( x, y, z );
-                    nodeList.Add ( node );
+                    Node node = new Node
+                    {
+                        worldPos = startPos + spawnShift,
+                        vectorPos = new Vector3(x, y, z)
+                    }; 
+                    //nodeList.Add ( node );
+                    nodeDict.Add( new Vector3Int(x,y,z), node );
 
                     foreach ( var nodeConnection in GetAllNodeConnections ( node ) )
                     {
@@ -474,9 +622,6 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
         }
     }
 
-
-
-
     private void SetStartEndPoints ( Vector3 startPos )
     {
         if ( startNode != null && endNode != null ) return;
@@ -484,16 +629,16 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
 
         Vector3 pointOfInterest = startPos;
 
-        Node[] nodes =
-            nodeList.Where ( v =>v.hasPreinserted==false && Vector3.Distance ( v.worldPos/*.transform.position*/, pointOfInterest ) > gridSize.x / 2 /*Mathf.PI*/)
+        Node[] nodes = nodeDict.Values//nodeList
+            .Where ( v =>v.hasPreinserted==false && Vector3.Distance ( v.worldPos/*.transform.position*/, pointOfInterest ) > gridSize.x / 2 /*Mathf.PI*/)
                 .ToArray ( );
         if ( nodes.Length > 0 )
         {
             if ( endNode == null ) endNode = nodes[Random.Range ( 0, nodes.Length )];
 
             pointOfInterest = endNode.worldPos/*.transform.position*/;
-            nodes =
-                nodeList.Where ( v => Vector3.Distance ( v.worldPos/*.transform.position*/, pointOfInterest ) > gridSize.x / 2 /*Mathf.PI*/)
+            nodes = nodeDict.Values//nodeList
+                .Where ( v => Vector3.Distance ( v.worldPos/*.transform.position*/, pointOfInterest ) > gridSize.x / 2 /*Mathf.PI*/)
                     .ToArray ( );
 
             if ( nodes.Length > 0 )
@@ -507,15 +652,312 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
 
     }
 
+    
+    
+    
+    [ContextMenu("Clean")]
+    public void CleanSpawned()
+    {
+        CleanSpawned(true);
+    }
+
+    public void CleanSpawned(bool cleanLists)
+    {
+        //CLEAR PREV NODES
+        foreach ( Transform child in transform.GetComponentsInChildren<Transform> (true ) )
+        {
+            if ( child != null && child != transform && child != startPoint ) DestroyImmediate ( child.gameObject );
+        }
+
+
+
+
+        if (cleanLists)
+        {
+            //Destroy unUsed nodes
+/*            if ( nodeList != null && nodeList.Count > 0 )
+            {
+                for ( int i = 0; i < nodeList.Count; i++ )
+                {
+                    if ( nodeList[i] != null )
+                    {
+                        GameObject o = nodeList[i].gameObject;
+                        if ( o != null ) Destroy/*Immediate#1# ( o );
+                    }
+
+                }
+            }*/
+
+
+            //if (nodeList != null) nodeList.Clear();
+            if (nodeDict != null) nodeDict.Clear();
+            pathToTarget = new List<PathNode>();
+            if (pointsOfInterest != null) pointsOfInterest.Clear();
+
+            if (openNodes != null) openNodes.Clear();
+            if (closedNodes != null) closedNodes.Clear();
+        }
+    }
+
+
+
+
+    #region World pos node test
+
+    [Header("World pos node test")]
+    public Transform wordPOsGizmoTr;
+    
+    [Serializable]
+    public class WorldPosNodeDebug
+    {
+        public Vector3 wPOsNodePos;
+        public List<Vector3> wPOsNodeLinks = new List<Vector3>();
+    }
+    public List<WorldPosNodeDebug> worldPosNodeDebugList = new List<WorldPosNodeDebug>();
+    public void GetNodeByWorldPosGizmo()
+    {
+        worldPosNodeDebugList.Clear();
+        var nodeByWorldPosList = pathToTarget
+            .Where(v => Vector3.Distance(v.node.worldPos, wordPOsGizmoTr.position)<stepDist)
+            .ToList();
+
+        worldPosNodeDebugList = nodeByWorldPosList.Select(v =>
+        {
+            Debug.DrawRay(v.node.worldPos, Vector3.up*20, Color.magenta, 5);
+
+            return new WorldPosNodeDebug()
+                {wPOsNodePos = v.node.worldPos, wPOsNodeLinks = v.links.Select(n => n.node.worldPos).ToList()};
+        }).ToList();
+
+    }
+
+    #endregion
+    
+    
     #endregion
 
+    
     #region Build Various Pathes
+
+
+    void GrowPath()
+    {
+        var gs = pathGrowSettings;
+        List<int> branchesStartFloors = new List<int>();
+        List<Vector3> verticalLinksVectorsPosList = new List<Vector3>();
+        
+        int lastFloor = 0;
+        int floorLockCounter = 0;
+
+        for (int i = 0; i < gs.pathGrowBranchesCount; i++)
+        {
+            #region Selecting pathNode to GROW
+
+            PathNode pathNode = null;
+            var pathNodes = pathToTarget.Where(v => v.node.hasPreinserted == false).ToList();
+
+            
+            if(pathNodes.Count==0)
+            {
+                pathNode = pathToTarget[pathToTarget.Count-1];
+            }
+            else
+            {
+/*                if (branchesStartFloors.Count>0)
+                {
+                    int floor = 0;
+
+                    if (floorLockCounter==0)
+                    {
+                        var ssT = branchesStartFloors
+                            .GroupBy(v => v)
+                            .Select(v => new Vector2Int(v.Key, v.Count()))
+                            //.Where(v=>v[1] < 10)
+                            .ToList();
+                        if (ssT.Count>0)
+                        {
+                            floor = ssT
+                                .OrderBy(v => v[1]) //TODO не выбирать этажи, которые имеют заполненных соседей 
+                                .First()[0];
+                        }
+                    }
+                    else
+                    {
+                        floorLockCounter--;
+                        floor = lastFloor;
+                    }
+                    
+                    
+                    
+                    var pathNodesFloorTemp = pathNodes.Where(v => (int) v.node.vectorPos.y == floor).ToList();
+                    if (pathNodesFloorTemp.Count > 0)
+                    {
+                        pathNodes = pathNodesFloorTemp;
+                        lastFloor = floor;
+                        
+                        if (floorLockCounter==0 && Random.Range(0, 100) < 30)
+                        {
+                            floorLockCounter = Random.Range(3, 20);
+                        }
+                    }
+                }*/
+
+/*                var pathNodesFiltered = pathNodes
+                    .Where(b =>
+                    verticalLinksVectorsPosList.All(v=>
+                    {
+                            var lPos = b.node.vectorPos;
+                            return Vector3.Distance(v, lPos) > 5; //иначе разрешать точки за пределами радиуса
+                        })
+                    )
+                    .ToList();
+                if (pathNodesFiltered.Count > 0)
+                {
+                    pathNodes = pathNodesFiltered;
+                }*/
+                pathNode = pathNodes.GetRandom();
+            }
+            
+            List<Node> branchNodes = new List<Node>( /*pathToTarget.Select(p=>p.node).ToList()*/ );
+            bool useVectorSorting = Random.Range(0f, 100f) < gs.nextNodeSelection_useVectorSortingChance;
+            bool onePlane = Random.Range(0f, 100f) < gs.nextNodeSelection_onePlaneChance ;
+            bool verticalLinks = Random.Range(0f, 100f) < 20 ;
+
+            
+            if (i < 5)
+            {
+                onePlane = true;
+                verticalLinks = false;
+            }
+            if (i> 5 && i < 15){
+                onePlane = false; //создавать на старте больше вертикальных веток
+                verticalLinks = true;
+                useVectorSorting = true;
+            }
+
+            #endregion
+            
+            
+            //GROWING fron selected path node
+            for (int j = 0; j < gs.pathGrowMaxCount; j++)
+            {
+                print("BranchTick");
+
+                if (pathNode != null)
+                {
+                    var links = pathNode.node.links.Where(v=> v.hasPreinserted==false && branchNodes.Contains(v) == false).ToList();
+                    if(links.Count==0) break;
+
+                    
+                    //INSERT SIGNATURE
+                    if (/*nextNode*/pathNode.node.hasPreinserted==false && Random.Range(0f, 100f) < gs.inserSignatureChance )
+                    {
+                        print("TryInsertSignature");
+                        if (InsertSignature(
+                            signatureInsertion.signatureToInsert.GetRandom(), /*nextNode*/
+                            pathNode.node.worldPos)
+                        )
+                        {
+                            print("SignatureInserted");
+                            continue;
+                        }
+                    }
+                  
+                    #region Remove UpDownLinks
+
+                    //if (/*useVectorSorting && */onePlane )
+                    {
+                        if (links.Count > 1 )
+                        {
+                            var link = links.FirstOrDefault(v=> (v.vectorPos.y - pathNode.node.vectorPos.y) > 0.1f);
+                            if (link != null && (onePlane || ExistingLinksIsNearToThis(verticalLinksVectorsPosList, link.vectorPos) ) )
+                            {
+                                links.Remove(link);
+                            }
+                        }
+                        if (links.Count > 1 )
+                        {
+                            var link = links.FirstOrDefault(v=> (v.vectorPos.y - pathNode.node.vectorPos.y) < -0.1f);
+                            if (link != null && (onePlane || ExistingLinksIsNearToThis(verticalLinksVectorsPosList, link.vectorPos)) )
+                            {
+                                links.Remove(link);
+                            }
+                        }
+                    }
+
+                    #endregion
+                    
+                    #region link with same direction
+
+                    if ( useVectorSorting && /*!onePlane && */links.Count > 0 && pathNode.links.Count>0)
+                    {
+                        Vector3 pathNodeVector = (pathNode.node.worldPos - pathNode.links[0].node.worldPos).normalized;
+                        
+                        var forwardLink = links.FirstOrDefault(v=> Vector3.Angle(pathNodeVector, (v.worldPos - pathNode.node.worldPos).normalized) < 30);
+                        if (forwardLink != null)
+                        {
+                            int upDownMult = 1;
+                            if (verticalLinks && Mathf.Abs(Vector3.Dot(pathNodeVector, Vector3.up)) > 0.9f)
+                            {
+                                upDownMult = gs.pathGrow_verticalMult;
+                            }
+                            
+                            for (int k = 0; k < gs.pathGrow_sameDirectionMult * upDownMult; k++)
+                            {
+                                links.Add(forwardLink);
+                            }
+                        }
+                    }
+
+                    #endregion
+                    
+                    
+                    var nextNode = links.GetRandom();
+
+
+                    
+                    var nextPathNode = new PathNode(){node = nextNode/*, IsVertical =*/ };
+                    
+                    pathToTarget.Add(nextPathNode);
+                    pathNode.AddLink(nextPathNode);
+                    branchNodes.Add( nextNode);
+                    
+                    
+                    bool isVertical = Mathf.Abs(pathNode.node.vectorPos.y - nextNode.vectorPos.y) > 0.1f;
+                    if (isVertical)
+                    {
+                        verticalLinksVectorsPosList.Add(pathNode.node.vectorPos);
+                        verticalLinksVectorsPosList.Add(nextNode.vectorPos);
+                    }
+                    
+                    branchesStartFloors.Add( (int)nextNode.vectorPos.y);
+                }
+
+                pathNode = pathToTarget[pathToTarget.Count - 1];
+            }
+        }
+
+    }
+
+    private static bool ExistingLinksIsNearToThis(List<Vector3> verticalLinksVectorsPosList, Vector3 lPos)
+    {
+        //Vector3 lPos = link.vectorPos;
+        return verticalLinksVectorsPosList.Any(v=>
+        {
+            //разрешать точки, находящиеся на/под целевой
+            if ((int) v.x == (int) lPos.x && (int) v.z == (int) lPos.z) return false;
+
+            //return true;
+            return Vector3.Distance(v, lPos) < 5; //иначе разрешать точки за пределами радиуса
+        }) == false;
+    }
+
 
     private void PathNoise ()
     {
         for ( int i = 0; i < pathNoiseCount; i++ )
         {
-            startNode = pathToTarget.Last ( ).node;
+            PathNoise_GetStartNodeFromPathToTraget();
             endNode = null;
 
             //build path from pathEnd to randomPath point
@@ -537,24 +979,32 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
             
 
             //Random point around path end point if end/start node not setted
-            if ( startNode == null ) startNode = pathToTarget.Last ( ).node;
+            if ( startNode == null )
+            {
+                PathNoise_GetStartNodeFromPathToTraget();
+            }
             SetStartEndPoints ( startNode.worldPos/*.transform.position*/ );
 
 
             //Build Path
-            pathToTarget.AddRange ( PathFindLoop ( ).Except(pathToTarget) );
-            pointsOfInterest.Add ( pathToTarget.Last ( ).node );
+            var pathFindLoopResult = PathFindLoop ( );
+            if (pathFindLoopResult != null)
+            {
+                pathToTarget.AddRange(pathFindLoopResult.Except(pathToTarget));
+                pointsOfInterest.Add(pathToTarget.Last().node);
+            }
 
         }
-
-
-
-        //Close OPEN ENDS
+    }
+    
+    private void CloseOpenPathEnds()
+    {
         int closedEndsCounter = 0;
         for (int i = 0; i < 200; i++)
         {
-            Node[] openNodesPair = GetPathOpenEnd ( );
-            if(openNodesPair[0]==null){
+            Node[] openNodesPair = GetPathOpenEnd();
+            if (openNodesPair[0] == null)
+            {
                 //print(i);
                 break; //Break if no open ends on Path
             }
@@ -569,21 +1019,47 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
                 {
                     Debug.DrawLine ( startNode.transform.position + Vector3.one *j, endNode.transform.position + Vector3.one * j, Color.blue, 20, false );
                 }*/
-                
+                if(startNode.hasPreinserted || endNode.hasPreinserted) continue;
+
                 //Build Path
                 closedEndsCounter++;
-                pathToTarget.AddRange ( PathFindLoop ( ).Except ( pathToTarget ) );
+                var pathFindLoopResult = PathFindLoop();
+                if (pathFindLoopResult != null)
+                {
+                    pathToTarget.AddRange(pathFindLoopResult/*.Except(pathToTarget)*/ );
+                }
             }
-
         }
-        print("Closed Dead End count = "+closedEndsCounter);
+
+        print("Closed Dead End count = " + closedEndsCounter);
     }
 
+    
+    
+    private void PathNoise_GetStartNodeFromPathToTraget()
+    {
+        if (pathToTarget.Count > 0)
+        {
+            startNode = pathToTarget.Last().node;
+        }
+        else
+        {
+/*            startNode = GetNodeByArrayId(
+                new Vector3(0, 0, 0)
+            ); //GetNodeByWorldPos( ClampPositionToGrid(transform.position) );*/
+
+            startNode = /*nodeList*/nodeDict.Values.ToList().GetRandom();
+        }
+    }
 
     private void BuildLongStarightPathesOnCross()
     {
         //MapNode dirNode = GetEmptyNodeConnection(startNode);//startNode.links.FirstOrDefault ( v => !pathToTarget.Select ( x => x.node ).Contains ( v ) );
-        if ( startNode == null ) startNode = pathToTarget.Last ( ).node;
+        if (startNode == null)
+        {
+            //startNode = pathToTarget.Last ( ).node;
+            PathNoise_GetStartNodeFromPathToTraget();
+        }
         startNode = GetRandomPointOnPathFarFromStartNode();
         if(startNode==null) return;
         
@@ -608,14 +1084,20 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
 
             for ( int j = 0; j < maxSteps; j++ )
             {
-                retNode = GetNodeByArrayId ( startNode.vectorPos + rot* dir * ( maxSteps - j )  );
+                var wPos = startNode.vectorPos + rot* dir * ( maxSteps - j );
+                Vector3Int wPosInt = new Vector3Int( (int)wPos.x, (int)wPos.y, (int)wPos.z);
+                retNode = GetNodeByArrayId ( wPosInt  );
                 if ( retNode != null )
                 {
                     endNode = retNode;
 
                     //Build Path
-                    pathToTarget.AddRange ( PathFindLoop ( ).Except ( pathToTarget ) );
-                    pointsOfInterest.Add ( pathToTarget.Last ( ).node );
+                    var pathFindLoopResult = PathFindLoop ( );
+                    if (pathFindLoopResult != null)
+                    {
+                        pathToTarget.AddRange(pathFindLoopResult.Except(pathToTarget));
+                        pointsOfInterest.Add(pathToTarget.Last().node);
+                    }
 
                     break;
                 }
@@ -677,12 +1159,13 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
     {
         if( pathToTarget.Count<2) return;
 
+        DateTime startTime = DateTime.Now;
 
         //reset occupation flag for every node
-        foreach (var node in nodeList)
+/*        foreach (var node in nodeList)
         {
             node.occupiedByTile = false;
-        }
+        }*/
 
         //clean signatures
         foreach ( var child in transform.GetComponentsInChildren<TileSignature> ( ) )
@@ -743,14 +1226,25 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
 
 
         print("Not occupied nodes count = "+pathToTarget.Count(v=> v!=null && !v.node.occupiedByTile) );
-
+        Debug.Log("Signatures checked and pasted for " + (DateTime.Now - startTime).TotalSeconds);
         //yield return null;
     }
 
 
     //public float signaturesScaleMult = 1;
+    [Header("Scan Signatures")]
+    public bool loadReses = true;
+
     private bool ScanSignature ( List<PathNode> nodes, TileSignature signature)
     {
+                
+        if (/*signatures.Count == 0 || pathToSignaturesLast != pathToSignatures*/loadReses && drawingGridBrushNow==false)
+        {
+            signatures = Resources.LoadAll<TileSignature> ( pathToSignatures ).ToList ( );
+            pathToSignaturesLast = pathToSignatures;
+        }
+        
+        
         //add every link of nodeChain to nodes list
         List<PathNode> linksList = new List<PathNode>();
         linksList = nodes.SelectMany ( v => v.links ).Except ( nodes ).ToList ( );
@@ -917,30 +1411,43 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
 
             dir[i/2] = i%2 == 0 ? 1 : -1;
             
-
-            retNode = GetNodeByArrayId (node.vectorPos + dir );
+            
+            var wPos = node.vectorPos + dir ;
+            Vector3Int wPosInt = new Vector3Int( (int)wPos.x, (int)wPos.y, (int)wPos.z);
+            retNode = GetNodeByArrayId ( wPosInt  );
+            
+            //retNode = GetNodeByArrayId (node.vectorPos + dir );
             if ( retNode != null ) nodes.Add ( retNode );
         }
 
         return nodes;
     }
 
-    public Node GetNodeByArrayId ( Vector3 vector )
+    public Node GetNodeByArrayId ( Vector3Int vector )
     {
-        for (int i = 0; i < nodeList.Count; i++)
+/*        for (int i = 0; i < nodeList.Count; i++)
         {
             Node v = nodeList[i];
-            if ( (v.vectorPos - vector).sqrMagnitude<0.1 ) return v;
-        }
+            //if ( (v.vectorPos - vector).sqrMagnitude<0.1 ) return v;
+            if (Vector3.Distance(v.vectorPos, vector) < 0.1f) return v;
+        }*/
+        if (nodeDict.ContainsKey(vector)) return nodeDict[vector];
+        
         return null;
     }
 
-    public Node GetNodeByWorldPos ( Vector3 pos )
+    public Node GetNodeByWorldPos ( Vector3 pos, bool clamp = false )
     {
-        return GetNodeByArrayId (
-            ( transform.InverseTransformPoint ( pos ) + ( gridSize / 2 - new Vector3 ( stepDist / 2f, stepDist / 2f, stepDist / 2f ) ) )
-            / stepDist
-        );
+        var gridCenterCorrection = ( gridSize / 2 - new Vector3 ( stepDist / 2f, stepDist / 2f, stepDist / 2f ) );
+        var localPos = transform.InverseTransformPoint ( pos );
+        pos = ( localPos + gridCenterCorrection )/ stepDist;
+        
+        if (clamp)
+        {
+            pos = ClampPositionToGrid(pos);
+        }
+        
+        return GetNodeByArrayId ( /*pos*/ new Vector3Int( (int)pos.x, (int)pos.y, (int)pos.z) );
     }
 
 
@@ -967,10 +1474,128 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
 
     #endregion
     
+    
+
+    
+    
 
     #region Pathfind
 
 
+    #region Recursive pathfind
+
+/*    public class RecursivePathFindResult
+    {
+        public Node node;
+        public Node endNode;
+        public List<Node> path = new List<Node>();
+        public int cost = 0;
+
+        public int currDepth = 0;
+        public int maxDepth = 10;
+
+
+        public enum State
+        {
+            working,
+            finished,
+            failed
+        };
+
+        public State currState = State.working;
+
+    }
+/*    public class RecursivePathBranch
+    {
+        public Node lastNode;
+        public List<Node> path = new List<Node>();
+    }#1#
+
+    public RecursivePathFindResult PathFind_Iterator(RecursivePathFindResult rpf )
+    {
+        pathToTarget = new List<PathNode>();
+        openPF_Branches = new List<RecursivePathFindResult>();
+        openPF_Branches.Add(rpf);
+        PathFind_R(rpf);
+
+        for (int i = 0; i < 100; i++)
+        {
+            var branchesCount = openPF_Branches.Count;
+            for (var index = 0; index < branchesCount; index++)
+            {
+                var r = openPF_Branches[index];
+                if(r.currState != RecursivePathFindResult.State.working) continue;
+                
+                PathFind_R(r);
+            }
+        }
+
+        return openPF_Branches
+            .Where(v => v.currState == RecursivePathFindResult.State.finished)
+            .OrderBy(v => v.path.Count).FirstOrDefault();
+    }
+
+    List<RecursivePathFindResult> openPF_Branches = new List<RecursivePathFindResult>();
+    //List<RecursivePathFindResult> removedBranches = new List<RecursivePathFindResult>();
+
+    
+    void PathFind_R( RecursivePathFindResult rpf )
+    {
+        //if(currDepth>= maxDepth) return new RecursivePathFindResult(){path = path};
+
+        if (rpf.currDepth < rpf.maxDepth)
+        {
+            for (var i = 0; i < rpf.node.links.Count; i++)
+            {
+                var link = rpf.node.links[i];
+                
+                
+                //if(rpf.path.Any(v=> v == link)) continue;
+                for (int j = 0; j < rpf.path.Count; j++)
+                {
+                    if(rpf.path[j] == link) continue;
+                }
+                
+                if (/*Vector3.Distance#1#(link.worldPos - endNode.worldPos).sqrMagnitude < 1f) //SUCCESS!!!!
+                {
+                    rpf.path.Add(link);
+                    rpf.currState = RecursivePathFindResult.State.finished;
+                    return;
+                    //return rpf;
+                }
+
+                
+                
+                RecursivePathFindResult r = new RecursivePathFindResult();
+                r.node = link;
+                r.endNode = rpf.endNode;
+                r.currDepth = rpf.currDepth+1;
+                r.maxDepth = rpf.maxDepth;
+                
+                r.path = new List<Node>( rpf.path);
+                r.path.Add(link);
+                
+                openPF_Branches.Add( r);
+                //return PathFind_R(r);
+            }
+        }
+        else
+        {
+            //rpf.currState = RecursivePathFindResult.State.failed;
+            openPF_Branches.Remove(rpf);
+            //removedBranches.Add(rpf);
+        }
+        openPF_Branches.Remove(rpf);
+        //removedBranches.Add(rpf);
+
+        //return rpf; //FINAL RESULT
+    }*/
+    
+
+    #endregion
+    
+    
+    
 
     private List<PathNode> openNodes = new List<PathNode> ( );
     private List<PathNode> closedNodes = new List<PathNode> ( );
@@ -980,30 +1605,62 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
 
     private List<PathNode> PathFindLoop ( )
     {
+        if (startNode.hasPreinserted || endNode.hasPreinserted)
+        {
+            return new List<PathNode>(){ new PathNode(){node = /*startNode*/GetNodeByArrayId(Vector3Int.zero)}};
+        }  
+        
         //Init start values
         StartPathfind ( startNode, endNode );
 
+
+
         //Iterate
-        while ( closestNode != null && closestNode.dist > /*stepDist*/0 )
+        //while ( closestNode != null && closestNode.dist > 0 )
+        Vector3Int gridSizeStep = new Vector3Int( 
+            Mathf.CeilToInt(gridSize.x/stepDist), 
+            Mathf.CeilToInt(gridSize.y/stepDist), 
+            Mathf.CeilToInt(gridSize.z/stepDist)
+            );
+        var maxClosedNodesCount = gridSizeStep.x * gridSizeStep.y * gridSizeStep.z;
+        maxClosedNodesCount = (int)Mathf.Sqrt(maxClosedNodesCount) * 4;
+        
+        FindNextNodeToReachTarget(endNode);
+
+        for (int i = 0; i < /*10000*/maxClosedNodesCount; i++)
         {
-            FindNextNodeToReachTarget ( endNode );
+            if (closestNode != null && closestNode.dist > 1 && closedNodes.Count< 500)
+            {
+                FindNextNodeToReachTarget(endNode);
+            }
+            else
+            {
+                if(i>100) Debug.Log("PathFindLoop break " + i);
+                //pathToTargetTemp = new List<PathNode>(){ new PathNode(){node = startNode}};
+                break;
+            }
+
+            if (i == maxClosedNodesCount - 1) //если поиск пути не завершен -> вернуть пустой путь, иначе сетка запонится мусором из поиска
+            {
+                Debug.Log("PatFind Failed " + maxClosedNodesCount );
+                return new List<PathNode>(){ new PathNode(){node = /*startNode*/GetNodeByArrayId(Vector3Int.zero)}};  
+            }
             //yield return new WaitForSeconds ( 1 );
         }
 
 
 
         #region BuilLinks
-
         List<PathNode> pathToTargetTemp = new List<PathNode>(closedNodes);
         BuildPathLinks(pathToTargetTemp);
 
-        //Link to start
+/*        //Link to start
         var firstPathNode = pathToTarget.FirstOrDefault(v => v.node == startNode);
         if (firstPathNode != null) pathToTargetTemp.First().AddLink(firstPathNode);
 
         //Link to last path Node
         var endPathNode = pathToTarget.FirstOrDefault(v => v.node == endNode);
-        if (endPathNode != null) pathToTargetTemp.Last().AddLink(endPathNode);
+        if (endPathNode != null) pathToTargetTemp.Last().AddLink(endPathNode);*/
 
         #endregion
 
@@ -1033,12 +1690,12 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
     }
 
 
-    private bool pathSearching;
+    //private bool pathSearching;
     public void StartPathfind ( Node start, Node end )
     {
 /*        if ( !pathSearching )
         {*/
-            pathSearching = true;
+            //pathSearching = true;
 
             closedNodes = new List<PathNode> ( );
             openNodes = new List<PathNode> ( );
@@ -1065,25 +1722,30 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
     private void FindNextNodeToReachTarget ( Node end )
     {
         //Calc open nodes around closed
-        foreach ( PathNode node in closedNodes.Where(v=>v.node.hasPreinserted==false)/*.Except(noisedNodes).Except(pathToTarget)*/ )
+        foreach ( PathNode node in closedNodes/*.Except(noisedNodes).Except(pathToTarget)*/ )
         {
+            if(node.node.hasPreinserted) continue;
+            
+            
             var links = CalcNewPathNodes ( node.node.links.ToArray ( ), end, node.node );
 
             foreach ( PathNode pnLink in links )
             {
                 var link = pnLink;
-                if ( openNodes.Count ( v => v.node == link.node ) == 0 && closedNodes.Count ( v => v.node == link.node ) == 0  
-                                                                       && !link.node.hasPreinserted)
+                if(link.node.hasPreinserted) continue;
+                
+                if ( openNodes.Count ( v => v.node == link.node ) == 0 && closedNodes.Count ( v => v.node == link.node ) == 0 )
                 {
                     openNodes.Add ( pnLink );
                 }
             }
         }
+        
 
 
 
         //select best next node to tick
-        closestNode = openNodes.OrderBy ( v => v.cost ).FirstOrDefault ( );
+        closestNode = openNodes.Where(v=> v.node.hasPreinserted==false).OrderBy ( v => v.cost  ).FirstOrDefault ( );
 
 
         if (closestNode != null && closedNodes.Count ( v => v.node == closestNode.node ) == 0 )
@@ -1133,7 +1795,7 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
 
 
 
-    #region DrawGrid
+    #region EditGrid_Drawing
 
     private int currHeightLayerPrev = 0;
     public void CalcCurrPointerPosition()
@@ -1350,6 +2012,7 @@ public class PathNode
     public List<PathNode> links = new List<PathNode>();
     //public List<PathNode> pathLinks = new List<PathNode> ( );
 
+    public bool IsVertical { get; set; }
 
 
     #endregion
@@ -1363,8 +2026,8 @@ public class PathNode
             return;
         }
     
-        dist = Vector3.Distance(node.worldPos, target.worldPos/*.transform.position*/);
-        step = Vector3.Distance(node.worldPos, currStepNode.worldPos/*.transform.position*/);
+        dist = Vector3.Distance(node.worldPos, target.worldPos);
+        step = Vector3.Distance(node.worldPos, currStepNode.worldPos);
 
         cost = dist + step;
     }

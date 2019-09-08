@@ -19,6 +19,8 @@ public class TileSignature : MonoBehaviour
 
     
     public List<Vector3> signatureVector = new List<Vector3>(){new Vector3(0,0,0)};
+    public List<Vector3> signatureVector_additionalPoints = new List<Vector3>();
+
     public List<Vector3> signatureLinks = new List<Vector3>(); 
 
     public Vector3 rotCorrection = Vector3.zero;
