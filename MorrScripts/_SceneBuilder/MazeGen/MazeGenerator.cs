@@ -2,7 +2,6 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using ProceduralToolkit;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -21,12 +20,16 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
     #region Vars
 
     public bool genOnStart = false;
+    public bool connectOpenLinks = true;
 
     
     [Serializable]
     public class DrawPathLinksSettings
     {
        public bool draw = true;
+       public bool drawPreinserted = false;
+       public bool drawOccupied = false;
+
        public bool onlyUpDown = false;
        [Range(-1, 200)]
        public int floor = -1;
@@ -108,8 +111,7 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
     Node startNode, endNode,  pathStartNode, pathEndNode;
     public Transform startPoint;
 
-    [HideInInspector] 
-    public List<Node> pointsOfInterest = new List<Node> ( );
+    private List<Node> PointsOfInterest { get; set; } = new List<Node>();
 
 
     [Header("Signatures")]
@@ -121,11 +123,12 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
     //private List<Node> nodeList { get; set; } = new List<Node>();
     private Dictionary<Vector3Int, Node> nodeDict = new Dictionary<Vector3Int, Node>();
 
-    [HideInInspector]
-    public List<PathNode> pathToTarget = new List<PathNode> ( );
+    private List<PathNode> pathToTarget = new List<PathNode> ( );
 
 
-    //draw grid brush
+
+    #region GridBrush
+
     [Header("Grid Brush")] 
     public bool drawingGridBrushNow = true;
     public int currHeightLayer = 0;
@@ -138,20 +141,45 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
 
     public LayerMask gridBrushLayerMask = -1;
 
+        #endregion
 
 
     #region SignatureInsertion
 
+
+    [Serializable]
+    public class SignatureWithRatio
+    {
+        public TileSignature signature;
+        public int ratio = 1;
+    }
+
     [Serializable]
     public class SignatureInsertion
     {
-        public TileSignature[] signatureToInsert = new TileSignature[0];
-        public int maxCount = 5;
+        public List<TileSignature> SignatureToInsert { get; set; }
+        public SignatureWithRatio[] signatureToInsert_withRatio = new SignatureWithRatio[0];
+
+        //public int maxCount = 5;
+
+        public void Init()
+        {
+            SignatureToInsert = new List<TileSignature>();
+
+            foreach (var signatureWithRatio in signatureToInsert_withRatio)
+            {
+                for (int i = 0; i < signatureWithRatio.ratio; i++)
+                {
+                    SignatureToInsert.Add( signatureWithRatio.signature);
+                }
+            }
+        }
     }
     [Header("PreInsert Big Signatures")]
     public SignatureInsertion signatureInsertion = new SignatureInsertion();
 
     #endregion
+    
     
     #endregion
 
@@ -212,7 +240,7 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
         var drS = drawPathLinksSettings;
 //        drS.MaxFloor = (int)(gridSize.y / stepDist);
         
-        if ( !drS.draw && pathToTarget != null && pathToTarget .Count>1) return;
+        if ( !drS.draw || pathToTarget == null || pathToTarget.Count==0) return;
 
         if (drS.animateFloors)
         {
@@ -229,19 +257,22 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
         }
 
 
-/*        foreach (var n in nodeDict.Values)
+        if (drS.drawPreinserted || drS.drawOccupied)
         {
-            if (n.hasPreinserted)
+            foreach (var n in nodeDict.Values)
             {
-                Color color = Color.blue;
+                if (n.hasPreinserted || n.occupiedByTile)
+                {
+                    Color color = n.occupiedByTile && drS.drawOccupied ? Color.red : Color.blue;
 
-                Debug.DrawRay (
-                    n.worldPos,
-                    Vector3.up*3, 
-                    color
-                );
+                    Debug.DrawRay (
+                        n.worldPos,
+                        Vector3.up*3, 
+                        color
+                    );
+                }
             }
-        }*/
+        }
         
         
         
@@ -319,6 +350,8 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
     {
         DateTime startTime = DateTime.Now;
         
+        signatureInsertion.Init();
+        
 /*
         
         if (/*signatures.Count == 0 || pathToSignaturesLast != pathToSignatures#1#loadReses && drawingGridBrushNow==false)
@@ -328,14 +361,13 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
         }*/
 
         CleanSpawned(true);
-
         GenerateGrid ( );
 
 /*        if ( startPoint != null )
         {
             Vector3 startPointClampedPos = ClampPositionToGrid ( startPoint.position );
 
-            startNode = nodeList.FirstOrDefault ( v => Vector3.Distance ( v.worldPos/*.transform.position#1#, startPointClampedPos ) < stepDist );
+            startNode = nodeDict.Values.FirstOrDefault ( v => Vector3.Distance ( v.worldPos, startPointClampedPos ) < stepDist );
             if ( startNode != null ) pathStartNode = startNode;
         }*/
 
@@ -344,9 +376,9 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
 
         var hG = gridSize.z / stepDist / 2f;
         var insertSignatureStartShift = Vector3.zero;//new Vector3( 0,0, Random.Range( -hG,  hG ));
-        InsertSignature(signatureInsertion.signatureToInsert.GetRandom(), insertSignatureStartShift );
+        InsertSignature(signatureInsertion.SignatureToInsert.GetRandom(), insertSignatureStartShift );
 
-        if (pointsOfInterest.Count > 0) endNode = pointsOfInterest[0];
+        if (PointsOfInterest.Count > 0) endNode = PointsOfInterest[0];
 
         #endregion
 
@@ -360,7 +392,7 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
 
         GrowPath();
         PathNoise ( );
-        CloseOpenPathEnds();
+        if(connectOpenLinks) CloseOpenPathEnds();
         ConnectSeparatedPathParts();
   
 
@@ -427,22 +459,37 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
         {
             List<Vector3> signatureVectorWithLinks = new List<Vector3>(signatureToInsert.signatureVector);
             signatureVectorWithLinks.Insert(0, signatureToInsert.signatureLinks[0]);
-            signatureVectorWithLinks.Insert(signatureVectorWithLinks.Count, signatureToInsert.signatureLinks[1]);
+            signatureVectorWithLinks.Insert(signatureVectorWithLinks.Count, signatureToInsert.signatureLinks.Last());
 
-            
+            //start link Vector
+/*            var link_zero = signatureVectorWithLinks[0] + (signatureVectorWithLinks[0] - signatureVectorWithLinks[1]);
+            int  li = signatureVectorWithLinks.Count-1;
+            var link_LastPlus = signatureVectorWithLinks[li] + (signatureVectorWithLinks[li] - signatureVectorWithLinks[li-1]);
+            signatureVectorWithLinks.Insert(/*li#1#signatureVectorWithLinks.Count, link_LastPlus);
+            signatureVectorWithLinks.Insert(0, link_zero);*/
+
+
             var randRotV = (float)Random.Range(0, 4) * 90f;
             var randRotQ = Quaternion.Euler(0, randRotV, 0);
+            var startLinkShift = randRotQ * -signatureToInsert.signatureLinks[0];
+            List<int> notPreinsertedNodeIndexesList = new List<int>();
 
             for (var i = 0; i < signatureVectorWithLinks.Count; i++)
             {
                 var v3 = signatureVectorWithLinks[i];
+                if (signatureToInsert.signatureVector_setNotPreinserted.Any(v => Vector3.Distance(v, v3) < 1))
+                {
+                    notPreinsertedNodeIndexesList.Add(i);
+                }
+                
                 v3 = randRotQ * v3;
-                Vector3 wPos = transform.position + insertSignatureStartShift + v3 * stepDist; //transform.position + (insertSignatureStartShift + v3) * stepDist;
+                Vector3 wPos = transform.position + insertSignatureStartShift + ((v3 + startLinkShift) * stepDist); 
 
                 signatureVectorWithLinks[i] = wPos/*v3*/;
             }
 
             List<Node> nodeList = new List<Node>();
+            
             for (var i = 0; i < signatureVectorWithLinks.Count; i++)
             {
                 Vector3 v3 = signatureVectorWithLinks[i];
@@ -451,7 +498,7 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
                 Node node = GetNodeByWorldPos( /*wPos*/ v3);
                 if (node == null || node.hasPreinserted  || (i>2 && pathToTarget.Any(v=> v.node==node)) )
                 {
-                    print("TryInsertSignature_NodeAlreadyPreinserted");
+                    //print("TryInsertSignature_NodeAlreadyPreinserted");
                     return false;
                 }
                 
@@ -459,22 +506,20 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
             }
 
 
+            int preinsertCutRange = signatureToInsert.preinsertCutRange;//1;
             for (var i = 0; i < nodeList.Count; i++)
             {
                 //Debug.DrawRay(wPos, Vector3.up * 50, Color.magenta, 20);
                 Node node = nodeList[i];
                 
                 //POINTS OF INTERESTS from links
-                if (i == 0 || i == nodeList.Count - 1)
-                {
-                    //pointsOfInterest.Add( node);
-                }
-                else
+                if (i >= preinsertCutRange && i <= nodeList.Count - (preinsertCutRange+1) && !notPreinsertedNodeIndexesList.Contains(i) )
                 {
                     node.hasPreinserted = true;
                 }
 
-                
+
+
                 PathNode pathNode = new PathNode() {node = node, step = stepDist};
                 if (prevNode != null) pathNode.AddLink(prevNode);
 
@@ -484,6 +529,16 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
             }
 
             
+            
+            foreach (Vector3 v3 in signatureToInsert.pointsOfInterest)
+            {
+                Vector3 wPos = transform.position + insertSignatureStartShift + ((randRotQ * v3 + startLinkShift) * stepDist);
+
+                Node interestNode = GetNodeByWorldPos(wPos);
+                if (interestNode != null) PointsOfInterest.Add(interestNode);
+            }
+            PointsOfInterest.Add(nodeList.Last());
+            //Debug.DrawRay(transform.position + insertSignatureStartShift, Vector3.up*10, Color.yellow, 20);
             
             
             //additional points => set preinserted
@@ -518,6 +573,272 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
 
     #endregion
     
+    
+    
+    #region Path Grow
+
+    void GrowPath()
+    {
+        if(pathToTarget.Count==0) return;
+        
+        List<int> branchesStartFloors = new List<int>();
+        List<Vector3> verticalLinksVectorsPosList = new List<Vector3>();
+        
+
+        for (int i = 0; i < pathGrowSettings.pathGrowBranchesCount; i++)
+        {
+            if (PathGrow_GetNodeToGrow(branchesStartFloors, out var pathNode)) break;
+            
+            var useVectorSorting = Random.Range(0f, 100f) < pathGrowSettings.nextNodeSelection_useVectorSortingChance;
+            var onePlane = Random.Range(0f, 100f) < pathGrowSettings.nextNodeSelection_onePlaneChance;
+            var verticalLinks = Random.Range(0f, 100f) < 20;
+
+            Node prevNode = null;
+            
+            GrowBranch(pathGrowSettings, pathNode, pathGrowSettings.pathGrowMaxCount, pathGrowSettings.inserSignatureChance, false,
+                onePlane, verticalLinksVectorsPosList, useVectorSorting, verticalLinks, branchesStartFloors);
+        }
+
+    }
+
+    
+    
+    private void GrowBranch(PathGrowSettings gs, PathNode pathNode, int growCount, float insertSignatureChance, bool isRecursion, bool onePlane,
+        List<Vector3> verticalLinksVectorsPosList, bool useVectorSorting, bool verticalLinks, List<int> branchesStartFloors)
+    {
+        var branchNodes = new List<Node>( );
+
+        
+//GROWING fron selected path node
+        for (int j = 0; j < growCount/*gs.pathGrowMaxCount*/; j++)
+        {
+            if (pathNode == null) break;
+            if (pathNode != null)
+            {
+                var links = pathNode.node.links
+                    .Where( v => v.hasPreinserted == false && branchNodes.Contains(v) == false )
+                    .ToList();
+                if (links.Count == 0) break;
+
+
+                //INSERT SIGNATURE
+                if ( /*nextNode*/pathNode.node.hasPreinserted == false && Random.Range(0f, 100f) < /*gs.inserSignatureChance*/insertSignatureChance)
+                {
+                    if (InsertSignature( signatureInsertion.SignatureToInsert.GetRandom(), pathNode.node.worldPos ))
+                    {
+                        pathNode = pathToTarget[pathToTarget.Count - 1];
+
+                        
+                        //если блок имел несколько ходов => строим для каждого короткий путь с упрощенными правилами
+                        if (isRecursion == false)
+                        {
+                            int pi_count = PointsOfInterest.Count;
+                            for (int i = 0; i < pi_count ; i++)
+                            {
+                                Node node = PointsOfInterest[0];
+                                PointsOfInterest.RemoveAt(0);
+   
+                                PathNode sign_pathNode = new PathNode(){node = node};
+   
+                                GrowBranch(pathGrowSettings, sign_pathNode, 15, 0, true,
+                                    true, verticalLinksVectorsPosList, true, false, branchesStartFloors);
+                            } 
+                        }
+
+
+                        continue;
+                    }
+                }
+
+                #region Remove UpDownLinks
+
+                //if (/*useVectorSorting && */onePlane )
+                {
+                    if (links.Count > /*1*/0)
+                    {
+                        var link = links.FirstOrDefault(v => (v.vectorPos.y - pathNode.node.vectorPos.y) > 0.1f);
+                        if (link != null &&
+                            (onePlane || ExistingLinksIsNearToThis(verticalLinksVectorsPosList, link.vectorPos)))
+                        {
+                            links.Remove(link);
+                        }
+                    }
+
+                    if (links.Count > /*1*/0)
+                    {
+                        var link = links.FirstOrDefault(v => (v.vectorPos.y - pathNode.node.vectorPos.y) < -0.1f);
+                        if (link != null &&
+                            (onePlane || ExistingLinksIsNearToThis(verticalLinksVectorsPosList, link.vectorPos)))
+                        {
+                            links.Remove(link);
+                        }
+                    }
+                }
+                if (links.Count == 0) break;
+
+                #endregion
+
+                #region link with same direction
+
+                if (useVectorSorting && /*!onePlane && */links.Count > 0 && pathNode.links.Count > 0)
+                {
+                    Vector3 pathNodeVector = (pathNode.node.worldPos - pathNode.links[0].node.worldPos).normalized;
+
+                    var forwardLink = links.FirstOrDefault(v =>
+                        Vector3.Angle(pathNodeVector, (v.worldPos - pathNode.node.worldPos).normalized) < 30);
+                    if (forwardLink != null)
+                    {
+                        int upDownMult = 1;
+                        if (verticalLinks && Mathf.Abs(Vector3.Dot(pathNodeVector, Vector3.up)) > 0.9f)
+                        {
+                            upDownMult = gs.pathGrow_verticalMult;
+                        }
+
+                        for (int k = 0; k < gs.pathGrow_sameDirectionMult * upDownMult; k++)
+                        {
+                            links.Add(forwardLink);
+                        }
+                    }
+                }
+
+                #endregion
+
+
+                var nextNode = links.GetRandom();
+
+
+                var nextPathNode = new PathNode() {node = nextNode /*, IsVertical =*/};
+
+                pathToTarget.Add(nextPathNode);
+                pathNode.AddLink(nextPathNode);
+                branchNodes.Add(nextNode);
+
+
+                bool isVertical = Mathf.Abs(pathNode.node.vectorPos.y - nextNode.vectorPos.y) > 0.1f;
+                if (isVertical)
+                {
+                    verticalLinksVectorsPosList.Add(pathNode.node.vectorPos);
+                    verticalLinksVectorsPosList.Add(nextNode.vectorPos);
+                }
+
+                branchesStartFloors.Add((int) nextNode.vectorPos.y);
+            }
+
+
+            pathNode = pathToTarget[pathToTarget.Count - 1];
+        }
+    }
+
+
+    
+    private int lastFloor;
+    private int floorLockCounter;
+    private bool PathGrow_GetNodeToGrow(List<int> branchesStartFloors, out PathNode pathNode )
+    {
+        #region Selecting pathNode to GROW
+
+        pathNode = null;
+      
+
+        
+        if (PointsOfInterest.Count > 0)
+        {
+            int randomIndex = Random.Range(0, PointsOfInterest.Count);
+            pathNode = new PathNode() {node = PointsOfInterest[randomIndex]};
+            PointsOfInterest.RemoveAt(randomIndex);
+
+            return false;
+        }
+
+        var pathNodes = pathToTarget
+            .Where(v => v.node.hasPreinserted == false /*&& v.node.links.Any(l=>l.hasPreinserted==false)*/).ToList();
+
+
+        if (pathNodes.Count == 0)
+        {
+            //pathNode = pathToTarget[pathToTarget.Count-1];
+            return true;
+        }
+        else
+        {
+            if (branchesStartFloors.Count > 0)
+            {
+                int floor = 0;
+
+                if (floorLockCounter == 0)
+                {
+                    var ssT = branchesStartFloors
+                        .GroupBy(v => v)
+                        .Select(v => new Vector2Int(v.Key, v.Count()))
+                        //.Where(v=>v[1] < 10)
+                        .ToList();
+                    if (ssT.Count > 0)
+                    {
+                        floor = ssT
+                            .OrderBy(v => v[1]) //TODO не выбирать этажи, которые имеют заполненных соседей 
+                            .First()[0];
+                    }
+                }
+                else
+                {
+                    floorLockCounter--;
+                    floor = lastFloor;
+                }
+
+
+                var pathNodesFloorTemp = pathNodes.Where(v => (int) v.node.vectorPos.y == floor).ToList();
+                if (pathNodesFloorTemp.Count > 0)
+                {
+                    pathNodes = pathNodesFloorTemp;
+                    lastFloor = floor;
+
+                    if (floorLockCounter == 0 && Random.Range(0, 100) < 30)
+                    {
+                        floorLockCounter = Random.Range(3, 20);
+                    }
+                }
+            }
+
+/*                var pathNodesFiltered = pathNodes
+                    .Where(b =>
+                    verticalLinksVectorsPosList.All(v=>
+                    {
+                            var lPos = b.node.vectorPos;
+                            return Vector3.Distance(v, lPos) > 5; //иначе разрешать точки за пределами радиуса
+                        })
+                    )
+                    .ToList();
+                if (pathNodesFiltered.Count > 0)
+                {
+                    pathNodes = pathNodesFiltered;
+                }*/
+            pathNode = pathNodes.GetRandom();
+        }
+
+/*        branchNodes = new List<Node>( /*pathToTarget.Select(p=>p.node).ToList()#1#);
+        useVectorSorting = Random.Range(0f, 100f) < gs.nextNodeSelection_useVectorSortingChance;
+        onePlane = Random.Range(0f, 100f) < gs.nextNodeSelection_onePlaneChance;
+        verticalLinks = Random.Range(0f, 100f) < 20;*/
+
+
+/*            if (i < 5)
+            {
+                onePlane = true;
+                verticalLinks = false;
+            }
+            if (i> 5 && i < 15){
+                onePlane = false; //создавать на старте больше вертикальных веток
+                verticalLinks = true;
+                useVectorSorting = true;
+            }*/
+
+        #endregion
+
+        return false;
+    }
+
+    #endregion
+
     
     
     #region PathGen_Utils
@@ -584,7 +905,7 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
         //nodeList = new List<Node> ( );
         nodeDict = new Dictionary<Vector3Int, Node>();
         pathToTarget = new List<PathNode> ( );
-        pointsOfInterest = new List<Node> ( );
+        PointsOfInterest = new List<Node> ( );
 
 
 
@@ -692,7 +1013,7 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
             //if (nodeList != null) nodeList.Clear();
             if (nodeDict != null) nodeDict.Clear();
             pathToTarget = new List<PathNode>();
-            if (pointsOfInterest != null) pointsOfInterest.Clear();
+            if (PointsOfInterest != null) PointsOfInterest.Clear();
 
             if (openNodes != null) openNodes.Clear();
             if (closedNodes != null) closedNodes.Clear();
@@ -740,205 +1061,9 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
     #region Build Various Pathes
 
 
-    void GrowPath()
-    {
-        var gs = pathGrowSettings;
-        List<int> branchesStartFloors = new List<int>();
-        List<Vector3> verticalLinksVectorsPosList = new List<Vector3>();
-        
-        int lastFloor = 0;
-        int floorLockCounter = 0;
 
-        for (int i = 0; i < gs.pathGrowBranchesCount; i++)
-        {
-            #region Selecting pathNode to GROW
-
-            PathNode pathNode = null;
-            var pathNodes = pathToTarget.Where(v => v.node.hasPreinserted == false).ToList();
-
-            
-            if(pathNodes.Count==0)
-            {
-                pathNode = pathToTarget[pathToTarget.Count-1];
-            }
-            else
-            {
-/*                if (branchesStartFloors.Count>0)
-                {
-                    int floor = 0;
-
-                    if (floorLockCounter==0)
-                    {
-                        var ssT = branchesStartFloors
-                            .GroupBy(v => v)
-                            .Select(v => new Vector2Int(v.Key, v.Count()))
-                            //.Where(v=>v[1] < 10)
-                            .ToList();
-                        if (ssT.Count>0)
-                        {
-                            floor = ssT
-                                .OrderBy(v => v[1]) //TODO не выбирать этажи, которые имеют заполненных соседей 
-                                .First()[0];
-                        }
-                    }
-                    else
-                    {
-                        floorLockCounter--;
-                        floor = lastFloor;
-                    }
-                    
-                    
-                    
-                    var pathNodesFloorTemp = pathNodes.Where(v => (int) v.node.vectorPos.y == floor).ToList();
-                    if (pathNodesFloorTemp.Count > 0)
-                    {
-                        pathNodes = pathNodesFloorTemp;
-                        lastFloor = floor;
-                        
-                        if (floorLockCounter==0 && Random.Range(0, 100) < 30)
-                        {
-                            floorLockCounter = Random.Range(3, 20);
-                        }
-                    }
-                }*/
-
-/*                var pathNodesFiltered = pathNodes
-                    .Where(b =>
-                    verticalLinksVectorsPosList.All(v=>
-                    {
-                            var lPos = b.node.vectorPos;
-                            return Vector3.Distance(v, lPos) > 5; //иначе разрешать точки за пределами радиуса
-                        })
-                    )
-                    .ToList();
-                if (pathNodesFiltered.Count > 0)
-                {
-                    pathNodes = pathNodesFiltered;
-                }*/
-                pathNode = pathNodes.GetRandom();
-            }
-            
-            List<Node> branchNodes = new List<Node>( /*pathToTarget.Select(p=>p.node).ToList()*/ );
-            bool useVectorSorting = Random.Range(0f, 100f) < gs.nextNodeSelection_useVectorSortingChance;
-            bool onePlane = Random.Range(0f, 100f) < gs.nextNodeSelection_onePlaneChance ;
-            bool verticalLinks = Random.Range(0f, 100f) < 20 ;
-
-            
-            if (i < 5)
-            {
-                onePlane = true;
-                verticalLinks = false;
-            }
-            if (i> 5 && i < 15){
-                onePlane = false; //создавать на старте больше вертикальных веток
-                verticalLinks = true;
-                useVectorSorting = true;
-            }
-
-            #endregion
-            
-            
-            //GROWING fron selected path node
-            for (int j = 0; j < gs.pathGrowMaxCount; j++)
-            {
-                print("BranchTick");
-
-                if (pathNode != null)
-                {
-                    var links = pathNode.node.links.Where(v=> v.hasPreinserted==false && branchNodes.Contains(v) == false).ToList();
-                    if(links.Count==0) break;
-
-                    
-                    //INSERT SIGNATURE
-                    if (/*nextNode*/pathNode.node.hasPreinserted==false && Random.Range(0f, 100f) < gs.inserSignatureChance )
-                    {
-                        print("TryInsertSignature");
-                        if (InsertSignature(
-                            signatureInsertion.signatureToInsert.GetRandom(), /*nextNode*/
-                            pathNode.node.worldPos)
-                        )
-                        {
-                            print("SignatureInserted");
-                            continue;
-                        }
-                    }
-                  
-                    #region Remove UpDownLinks
-
-                    //if (/*useVectorSorting && */onePlane )
-                    {
-                        if (links.Count > 1 )
-                        {
-                            var link = links.FirstOrDefault(v=> (v.vectorPos.y - pathNode.node.vectorPos.y) > 0.1f);
-                            if (link != null && (onePlane || ExistingLinksIsNearToThis(verticalLinksVectorsPosList, link.vectorPos) ) )
-                            {
-                                links.Remove(link);
-                            }
-                        }
-                        if (links.Count > 1 )
-                        {
-                            var link = links.FirstOrDefault(v=> (v.vectorPos.y - pathNode.node.vectorPos.y) < -0.1f);
-                            if (link != null && (onePlane || ExistingLinksIsNearToThis(verticalLinksVectorsPosList, link.vectorPos)) )
-                            {
-                                links.Remove(link);
-                            }
-                        }
-                    }
-
-                    #endregion
-                    
-                    #region link with same direction
-
-                    if ( useVectorSorting && /*!onePlane && */links.Count > 0 && pathNode.links.Count>0)
-                    {
-                        Vector3 pathNodeVector = (pathNode.node.worldPos - pathNode.links[0].node.worldPos).normalized;
-                        
-                        var forwardLink = links.FirstOrDefault(v=> Vector3.Angle(pathNodeVector, (v.worldPos - pathNode.node.worldPos).normalized) < 30);
-                        if (forwardLink != null)
-                        {
-                            int upDownMult = 1;
-                            if (verticalLinks && Mathf.Abs(Vector3.Dot(pathNodeVector, Vector3.up)) > 0.9f)
-                            {
-                                upDownMult = gs.pathGrow_verticalMult;
-                            }
-                            
-                            for (int k = 0; k < gs.pathGrow_sameDirectionMult * upDownMult; k++)
-                            {
-                                links.Add(forwardLink);
-                            }
-                        }
-                    }
-
-                    #endregion
-                    
-                    
-                    var nextNode = links.GetRandom();
-
-
-                    
-                    var nextPathNode = new PathNode(){node = nextNode/*, IsVertical =*/ };
-                    
-                    pathToTarget.Add(nextPathNode);
-                    pathNode.AddLink(nextPathNode);
-                    branchNodes.Add( nextNode);
-                    
-                    
-                    bool isVertical = Mathf.Abs(pathNode.node.vectorPos.y - nextNode.vectorPos.y) > 0.1f;
-                    if (isVertical)
-                    {
-                        verticalLinksVectorsPosList.Add(pathNode.node.vectorPos);
-                        verticalLinksVectorsPosList.Add(nextNode.vectorPos);
-                    }
-                    
-                    branchesStartFloors.Add( (int)nextNode.vectorPos.y);
-                }
-
-                pathNode = pathToTarget[pathToTarget.Count - 1];
-            }
-        }
-
-    }
-
+    
+    
     private static bool ExistingLinksIsNearToThis(List<Vector3> verticalLinksVectorsPosList, Vector3 lPos)
     {
         //Vector3 lPos = link.vectorPos;
@@ -991,7 +1116,7 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
             if (pathFindLoopResult != null)
             {
                 pathToTarget.AddRange(pathFindLoopResult.Except(pathToTarget));
-                pointsOfInterest.Add(pathToTarget.Last().node);
+                //pointsOfInterest.Add(pathToTarget.Last().node);
             }
 
         }
@@ -1000,7 +1125,7 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
     private void CloseOpenPathEnds()
     {
         int closedEndsCounter = 0;
-        for (int i = 0; i < 200; i++)
+        for (int i = 0; i < 400; i++)
         {
             Node[] openNodesPair = GetPathOpenEnd();
             if (openNodesPair[0] == null)
@@ -1024,7 +1149,7 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
                 //Build Path
                 closedEndsCounter++;
                 var pathFindLoopResult = PathFindLoop();
-                if (pathFindLoopResult != null)
+                if (pathFindLoopResult != null && pathFindLoopResult.All(v=>v.node.hasPreinserted==false && v.links.All(l=> l.node.hasPreinserted==false)))
                 {
                     pathToTarget.AddRange(pathFindLoopResult/*.Except(pathToTarget)*/ );
                 }
@@ -1096,7 +1221,7 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
                     if (pathFindLoopResult != null)
                     {
                         pathToTarget.AddRange(pathFindLoopResult.Except(pathToTarget));
-                        pointsOfInterest.Add(pathToTarget.Last().node);
+                        //pointsOfInterest.Add(pathToTarget.Last().node);
                     }
 
                     break;
@@ -1152,7 +1277,6 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
 
 
 
-
     #region SignatureCheck
 
     private void ScanPathForSignature()
@@ -1161,6 +1285,13 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
 
         DateTime startTime = DateTime.Now;
 
+        
+                        
+        if (/*signatures.Count == 0 || pathToSignaturesLast != pathToSignatures*/loadReses && drawingGridBrushNow==false)
+        {
+            signatures = Resources.LoadAll<TileSignature> ( pathToSignatures ).ToList ( );
+            pathToSignaturesLast = pathToSignatures;
+        }
         //reset occupation flag for every node
 /*        foreach (var node in nodeList)
         {
@@ -1213,11 +1344,11 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
                 if ( nodeChain.Count > 0 )
                 {
                     //Scan forward
-                    if (! ScanSignature(nodeChain, signature))
+                    if (! ScanSignature(nodeChain, signature, false))
                     {
                         //Reverse
                         nodeChain.Reverse ( );
-                        ScanSignature ( nodeChain, signature ); 
+                        ScanSignature ( nodeChain, signature, true ); 
                     }
                 }
                 //yield return null;
@@ -1235,27 +1366,37 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
     [Header("Scan Signatures")]
     public bool loadReses = true;
 
-    private bool ScanSignature ( List<PathNode> nodes, TileSignature signature)
+    
+    public class SignatureScanPoint
     {
-                
-        if (/*signatures.Count == 0 || pathToSignaturesLast != pathToSignatures*/loadReses && drawingGridBrushNow==false)
-        {
-            signatures = Resources.LoadAll<TileSignature> ( pathToSignatures ).ToList ( );
-            pathToSignaturesLast = pathToSignatures;
-        }
-        
-        
+        public Vector3 point;
+        public bool setOccupiedByTile = true;
+    }
+    
+    private bool ScanSignature ( List<PathNode> nodes, TileSignature signature, bool isReversed)
+    {
+     
         //add every link of nodeChain to nodes list
         List<PathNode> linksList = new List<PathNode>();
         linksList = nodes.SelectMany ( v => v.links ).Except ( nodes ).ToList ( );
 
 
         //Calc signature for nodes chain
-        List<Vector3> signaturePoints = new List<Vector3> ( nodes.Count );
+        List<SignatureScanPoint> signaturePoints = new List<SignatureScanPoint> ( nodes.Count );
+        List<int> notOccupiedIndexList = new List<int>();
+        for (var i = 0; i < signature.signatureVector.Count; i++)
+        {
+            var v3 = signature.signatureVector[i];
+            if (signature.pointsOfInterest.Any(v => Vector3.Distance(v, v3) < 1))
+            {
+                notOccupiedIndexList.Add(i);
+            }
+        }
 
         for ( int i = 0; i < nodes.Count; i++ )
         {
-            signaturePoints.Add( nodes[i].node.vectorPos - nodes[0].node.vectorPos);
+            var v3 = nodes[i].node.vectorPos - nodes[0].node.vectorPos;
+            signaturePoints.Add( new SignatureScanPoint(){point = v3/*, setOccupiedByTile = setTileOccupied*/});
         }
 
 
@@ -1277,7 +1418,7 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
             //ROTATE VECTORS
             for (int i = 0; i < signaturePoints.Count; i++)
             {
-                signaturePoints[i] = rot*signaturePoints[i];
+                signaturePoints[i].point = rot*signaturePoints[i].point;
             }
             for ( int i = 0; i < pointsLinksVectors.Count; i++ )
             {
@@ -1285,7 +1426,7 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
             }
 
             //CHECK
-            if ( IsMatchSignature ( signaturePoints.ToList ( ), pointsLinksVectors, signature ) )
+            if ( IsMatchSignature ( signaturePoints, pointsLinksVectors, signature ) && linksList.Count>0)
             {
                 //Debug.Log("Is match signature "+nodes[0].node.vectorPos+" quat = "+rot);
 
@@ -1302,7 +1443,8 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
                     Vector3 signLink = signature.signatureLinks[Mathf.Abs(signature.idPointsToZAxis) - 1];
                     var nodeIndex = pointsLinksVectors.FindIndex ( v => Vector3.SqrMagnitude(v - signLink) < 0.1f);
 
-                    rotDir = linksList[nodeIndex].node.worldPos - nodes[0].node.worldPos;
+                    if ( linksList.Count > nodeIndex && nodes.Count > 0)
+                        rotDir = linksList[nodeIndex].node.worldPos - nodes[0].node.worldPos;
                     rotDir.y = 0;
                 }
 
@@ -1313,6 +1455,8 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
                 #region SPAWN
 
 #if UNITY_EDITOR
+                Quaternion go2Rotation = Quaternion.LookRotation(rotDir) * Quaternion.Euler(signature.rotCorrection);
+
                 var go2 = PrefabUtility.InstantiatePrefab ( signature.transform,
                     transform.gameObject.scene
                 ) as Transform;
@@ -1320,7 +1464,7 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
                 if (go2 != null)
                 {
                     go2.position = nodes[0].node.worldPos;
-                    go2.rotation = Quaternion.LookRotation(rotDir) * Quaternion.Euler(signature.rotCorrection);
+                    go2.rotation = go2Rotation;
                     go2.parent = transform;
                     //go2.localScale = Vector3.one * signaturesScaleMult;
                 }
@@ -1336,11 +1480,16 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
 #endif
 
 
+                
+
 
                 //mark nodes as OCCUPIED
-                foreach (PathNode node in nodes)
+                //if (isReversed) signaturePoints.Reverse();
+                for (var i = 0; i < nodes.Count; i++)
                 {
-                    node.node.occupiedByTile = true;
+                    PathNode node = nodes[i];
+                    //signaturePoints.FirstOrDefault(v=> Vector3.Distance(v.point, node.w))
+                    node.node.occupiedByTile = !notOccupiedIndexList.Contains(i); //true;
                 }
 
                 #endregion
@@ -1353,7 +1502,7 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
         return false;
     }
 
-    bool IsMatchSignature(List<Vector3> points, List<Vector3> pointsLinks, TileSignature signature)
+    bool IsMatchSignature(/*List<Vector3>*/List<SignatureScanPoint> points, List<Vector3> pointsLinks, TileSignature signature)
     {
         int counter = 0;
         int linksMatchCounter = 0;
@@ -1361,7 +1510,7 @@ public class MazeGenerator : MonoBehaviour, IDragHandler, IBeginDragHandler
         //SIGNATURE CHECK
         for ( int i = 0; i < signature.signatureVector.Count; i++ )
         {
-            if (Vector3.SqrMagnitude(signature.signatureVector[i] - points[i]) < 0.1f) counter++;
+            if (Vector3.SqrMagnitude(signature.signatureVector[i] - points[i].point) < 0.1f) counter++;
         }
 
         if (counter != signature.signatureVector.Count) return false;

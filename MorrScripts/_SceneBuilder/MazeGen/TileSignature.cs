@@ -11,6 +11,9 @@ public class TileSignature : MonoBehaviour
 {
     [Tooltip("Postive values = signature points. Negative = node links")]
     public int idPointsToZAxis = 2;
+    public int preinsertCutRange = 1;
+    public int gridStep = 10;
+
 
 /*    public bool calcVectors = false;
     public float stepDist = 50;
@@ -19,11 +22,17 @@ public class TileSignature : MonoBehaviour
 
     
     public List<Vector3> signatureVector = new List<Vector3>(){new Vector3(0,0,0)};
-    public List<Vector3> signatureVector_additionalPoints = new List<Vector3>();
+    //public List<Vector3> signatureVector_additionalPoints = new List<Vector3>();
 
     public List<Vector3> signatureLinks = new List<Vector3>(); 
 
+    [Header("Rotation")]
     public Vector3 rotCorrection = Vector3.zero;
+
+    [Header("Correction")]
+    public List<Vector3> signatureVector_setNotPreinserted = new List<Vector3>();
+    public List<Vector3> pointsOfInterest = new List<Vector3>();
+
 
 
 
@@ -49,7 +58,7 @@ public class TileSignature : MonoBehaviour
 
 
 #region CustomEditorButton
-#if UNITY_EDITOR
+/*#if UNITY_EDITOR
 
 [CanEditMultipleObjects]
 [CustomEditor ( typeof ( TileSignature ) )]
@@ -81,6 +90,6 @@ public class TileSignature_Editor : Editor
 
 
 }
-#endif
+#endif*/
 
 #endregion
