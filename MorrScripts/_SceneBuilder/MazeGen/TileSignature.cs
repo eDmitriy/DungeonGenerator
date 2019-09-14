@@ -1,5 +1,6 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 #if UNITY_EDITOR
@@ -13,6 +14,7 @@ public class TileSignature : MonoBehaviour
     public int idPointsToZAxis = 2;
     public int preinsertCutRange = 1;
     public int gridStep = 10;
+    public bool isVerticalConnector = false;
 
 
 /*    public bool calcVectors = false;
@@ -20,7 +22,7 @@ public class TileSignature : MonoBehaviour
 
     public Transform[] signaturePoints = new Transform[0];*/
 
-    
+    [Tooltip("First and last items must be near to signatureLinks")]
     public List<Vector3> signatureVector = new List<Vector3>(){new Vector3(0,0,0)};
     //public List<Vector3> signatureVector_additionalPoints = new List<Vector3>();
 
@@ -52,7 +54,52 @@ public class TileSignature : MonoBehaviour
 
 	}*/
 
+    [ContextMenu("Signatures From Child Cubes")]
+    public void SignatureVectorsFromChildCubes()
+    {
+        MazeGenerator mazeGenerator = FindObjectOfType<MazeGenerator>();
+        if (mazeGenerator != null) gridStep = mazeGenerator.stepDist;
+        
 
+        List<Transform> cubesList = GetComponentsInChildren<Transform>()./*Where(v=>v.name.Contains("Cube")).*/ToList();
+        signatureVector = new List<Vector3>();
+        signatureLinks = new List<Vector3>();
+        pointsOfInterest = new List<Vector3>();
+        
+        foreach (var cTr in cubesList)
+        {
+            if (cTr.name.Contains("Cube"))
+            {
+                AddVectorToList(cTr, signatureVector);
+            }
+            if (cTr.name.Contains("LINK"))
+            {
+                AddVectorToList(cTr, signatureLinks);
+            }
+            if (cTr.name.Contains("INTEREST"))
+            {
+                AddVectorToList(cTr, pointsOfInterest);
+            }
+        }
+    }
+
+    
+    
+    private void AddVectorToList(Transform cTr, List<Vector3> list)
+    {
+        AddVectorToList(cTr, list, transform, gridStep);
+    }
+
+    static void AddVectorToList(Transform cTr, List<Vector3> list, Transform transform, float gridStep)
+    {
+        var inverseTransformPoint = transform.InverseTransformPoint(cTr.position);
+        for (int i = 0; i < 3; i++)
+        {
+            inverseTransformPoint[i] = Mathf.RoundToInt(inverseTransformPoint[i] / gridStep);
+        }
+
+        /*signatureVector*/list.Add(inverseTransformPoint);
+    }
 }
 
 
