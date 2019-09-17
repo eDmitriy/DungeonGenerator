@@ -22,7 +22,7 @@ public class MazeGenerator_BoundModifier : MonoBehaviour
                 transform.localScale.z
             );
 
-            if (_mazeGenerator != null && setFloorSlectionFromThis)
+            if (_mazeGenerator != null && setFloorSelectionFromThis)
             {
                 int floor = Mathf.CeilToInt(_mazeGenerator.gridSize.y/_mazeGenerator.stepDist/2) + 
                             Mathf.CeilToInt((bounds.center.y + bounds.extents.y) / _mazeGenerator.stepDist);
@@ -48,7 +48,7 @@ public class MazeGenerator_BoundModifier : MonoBehaviour
     public ModifierType currModifierType = ModifierType.exclude;
     public MazeGenerator.SignatureInsertion signatureInsertion = new MazeGenerator.SignatureInsertion();
 
-    public bool setFloorSlectionFromThis = false;
+    public bool setFloorSelectionFromThis = false;
     
     
     public ModifierType CurrModifierType

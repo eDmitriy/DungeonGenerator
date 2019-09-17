@@ -17,7 +17,7 @@ using UnityEditor;
 #endif
 
 [ExecuteInEditMode]
-public class MazeGenerator : MonoBehaviour/*, IDragHandler, IBeginDragHandler*/
+public class MazeGenerator : MonoBehaviour
 {
 
     #region Vars
@@ -239,6 +239,7 @@ public class MazeGenerator : MonoBehaviour/*, IDragHandler, IBeginDragHandler*/
     private void Start()
     {
         //if (planeCollider == null) planeCollider = GetComponent<BoxCollider>();
+        if(Application.isPlaying) return;
 
         if (genOnStart)
         {
@@ -254,6 +255,8 @@ public class MazeGenerator : MonoBehaviour/*, IDragHandler, IBeginDragHandler*/
 
     public void Update()
     {
+        if(Application.isPlaying) return;
+        
         DrawPathLinks();
     }
 
@@ -298,6 +301,9 @@ public class MazeGenerator : MonoBehaviour/*, IDragHandler, IBeginDragHandler*/
         
         NodeSelector.NodeSelectionViaMouse(pathToTarget, this );
 
+        
+
+        
         
         #region Sliders
 
@@ -400,14 +406,37 @@ public class MazeGenerator : MonoBehaviour/*, IDragHandler, IBeginDragHandler*/
             DestroySpawnedMeshes();
         }  
         
-/*        GUILayout.Space(10);
-        
-        if (GUILayout.Button("Path2Pt"))
-        {
-            PathFindSelectionNodes();
-        } */ 
+        GUILayout.Space(10);
 
-        //GUILayout.Box(NodeSelector.currRaycastWPos.ToString());
+
+        if (InsertSignatureFromEditorSelection_Check(out var selectedSign) )
+        {
+            #region snap selected tile
+
+            if (Event.current.shift && NodeSelector.pathNodeSelectionList.Count>1)
+            {
+                Transform lastSpawnedSignatureTr = selectedSign.transform;
+                Vector3 pos = lastSpawnedSignatureTr.position;
+        
+                lastSpawnedSignatureTr.position = new Vector3( 
+                                                      Mathf.RoundToInt(pos.x/stepDist)*stepDist,
+                                                      NodeSelector.pathNodeSelectionList[1].worldPos.y - stepDist/2,
+                                                      Mathf.RoundToInt(pos.z/stepDist)*stepDist
+                                                  ) + Vector3.one*stepDist/2;
+            }
+
+            #endregion
+            
+
+            if (  GUILayout.Button("Insert \nSelected"))
+            {
+                InsertSignature_FromSceneObject(selectedSign);
+                
+                Selection.objects = new UnityEngine.Object[0];
+            }  
+        }
+
+
         
         GUILayout.EndVertical();
         GUILayout.EndArea();
@@ -424,6 +453,26 @@ public class MazeGenerator : MonoBehaviour/*, IDragHandler, IBeginDragHandler*/
 
         #region Signatures palette
 
+        if (InsertSignatureFromEditorSelection_Check(out selectedSign, false))
+        {
+            if (GUILayout.Button("InsrtSignFromEdtrSelect"))
+            {
+                InsertSignature(selectedSign, NodeSelector.pathNodeSelectionList[1].worldPos, 
+                    false,true, false);
+                DrawPathLinks();
+            }
+            if (GUILayout.Button("InsrtPrefabFromEditorSelect"))
+            {
+                TileSignature spwnedTileSignature = Instantiate(selectedSign, NodeSelector.pathNodeSelectionList[1].worldPos, Quaternion.identity);
+                Selection.objects = new UnityEngine.Object[]{spwnedTileSignature.gameObject} ;
+                
+            }
+            GUILayout.Space(10);
+        }
+
+
+
+        
         var signaturesPaletteTagList = signatureInsertion.signaturesPalette.Select(v=>v.tag).Distinct().ToList();
         
         foreach (var sTag in signaturesPaletteTagList)
@@ -446,7 +495,8 @@ public class MazeGenerator : MonoBehaviour/*, IDragHandler, IBeginDragHandler*/
                 {
                     if (NodeSelector.pathNodeSelectionList.Count > 1)
                     {
-                        InsertSignature(sign.signature, NodeSelector.pathNodeSelectionList[1].worldPos, false);
+                        InsertSignature(sign.signature, NodeSelector.pathNodeSelectionList[1].worldPos, 
+                            false,true, false);
                         DrawPathLinks();
                     }
                 }
@@ -467,10 +517,6 @@ public class MazeGenerator : MonoBehaviour/*, IDragHandler, IBeginDragHandler*/
 
         Handles.EndGUI ( );
     }
-
-    
-    
-
 
 
 
@@ -614,9 +660,16 @@ public class MazeGenerator : MonoBehaviour/*, IDragHandler, IBeginDragHandler*/
 
             //var hG = gridSize.z / stepDist / 2f;
             var insertSignatureStartShift = Vector3.zero;//new Vector3( 0,0, Random.Range( -hG,  hG ));
-            InsertSignature(signatureInsertion.startTile, insertSignatureStartShift, false );
+            InsertSignature(signatureInsertion.startTile, insertSignatureStartShift, false, true, false );
 
             if (GrowPoints.Count > 0) endNode = GrowPoints[0];
+
+
+            TileSignature[] tileSignatures = FindObjectsOfType<TileSignature>();
+            foreach (var ts in tileSignatures)
+            {
+                InsertSignature_FromSceneObject(ts);
+            }
 
             #endregion
         }
@@ -690,7 +743,17 @@ public class MazeGenerator : MonoBehaviour/*, IDragHandler, IBeginDragHandler*/
         }
     }
 
-    private bool InsertSignature(TileSignature signatureToInsert, Vector3 insertSignatureStartShift, bool checkModifierVolume)
+
+    private bool InsertSignature(TileSignature signatureToInsert, Vector3 insertSignatureStartShift,
+        bool checkModifierVolume, bool applyStartLinkShift,
+        bool setPathNodesOccupied)
+    {
+        return InsertSignature(signatureToInsert, insertSignatureStartShift, checkModifierVolume, applyStartLinkShift,
+            setPathNodesOccupied, new Vector3(10, 1, 1));
+    }
+    
+    private bool InsertSignature(TileSignature signatureToInsert, Vector3 insertSignatureStartShift, bool checkModifierVolume, bool applyStartLinkShift, 
+        bool setPathNodesOccupied, Vector3 customRot)
     {
         PathNode prevNode = null;
         
@@ -701,14 +764,23 @@ public class MazeGenerator : MonoBehaviour/*, IDragHandler, IBeginDragHandler*/
 
             for (int r = 0; r < 4; r++)
             {
+                #region prepare data
+
                 List<Vector3> signatureVectorWithLinks = new List<Vector3>(signatureToInsert.signatureVector);
                 signatureVectorWithLinks.Insert(0, signatureToInsert.signatureLinks[0]);
                 signatureVectorWithLinks.Insert(signatureVectorWithLinks.Count, signatureToInsert.signatureLinks.Last());
                 
                 float randRotV = /*(float)Random.Range(0, 4)*/randRotIntsList[r] * 90f;
                 var randRotQ = Quaternion.Euler(0, randRotV, 0);
-                var startLinkShift = randRotQ * -signatureToInsert.signatureLinks[0];
+                if (customRot.x<10) randRotQ = Quaternion.Euler(customRot);
+                
+                Vector3 startLinkShift = Vector3.zero;
+                if(applyStartLinkShift) startLinkShift = randRotQ * -signatureToInsert.signatureLinks[0];
+                
                 List<int> notPreinsertedNodeIndexesList = new List<int>();
+
+                #endregion
+                
     
                 //prepare signatures
                 for (var i = 0; i < signatureVectorWithLinks.Count; i++)
@@ -754,6 +826,7 @@ public class MazeGenerator : MonoBehaviour/*, IDragHandler, IBeginDragHandler*/
                 if(mustTryNext) continue;
     
     
+                //build path from signature points
                 int preinsertCutRange = signatureToInsert.preinsertCutRange;
                 PathNode pathNode = null;
                 for (var i = 0; i < nodeList.Count; i++)
@@ -765,6 +838,7 @@ public class MazeGenerator : MonoBehaviour/*, IDragHandler, IBeginDragHandler*/
                     if (i >= preinsertCutRange && i <= nodeList.Count - (preinsertCutRange+1) && !notPreinsertedNodeIndexesList.Contains(i) )
                     {
                         node.hasPreinserted = true;
+                        if (setPathNodesOccupied) node.occupiedByTile = true;
                     }
     
     
@@ -776,9 +850,11 @@ public class MazeGenerator : MonoBehaviour/*, IDragHandler, IBeginDragHandler*/
     
                     pathToTarget.Add(pathNode);
                 }
-    
-                
-                
+
+
+
+                #region Add grow points for every signature link/interest point
+
                 foreach (Vector3 v3 in signatureToInsert.pointsOfInterest)
                 {
                     Vector3 wPos = transform.position + insertSignatureStartShift + ((randRotQ * v3 + startLinkShift) * stepDist);
@@ -787,16 +863,66 @@ public class MazeGenerator : MonoBehaviour/*, IDragHandler, IBeginDragHandler*/
                     if (interestNode != null) GrowPoints.Add(interestNode);
                 }
                 GrowPoints.Add(nodeList.Last());
+
+                #endregion
                 //Debug.DrawRay(transform.position + insertSignatureStartShift, Vector3.up*10, Color.yellow, 20);
 
                 //set node selection to signature exit link, so we can add signatures chain
                 if (pathNode != null) NodeSelector.AddNodeToList(pathNode);
 
+
+/*                if (setPathNodesOccupied)
+                {
+                    foreach (var node in nodeList)
+                    {
+                        node.occupiedByTile = true;
+                    }
+                }*/
+                
+                
+                //SUCCESSFULLY INSERTED
                 return true;
             }
         }
 
+        //FAILED
         return false;
+    }
+    
+    
+    
+    private void InsertSignature_FromSceneObject(TileSignature tileSignature)
+    {
+        if (tileSignature == null) return;
+        Transform selectedTr = tileSignature.transform;
+        Quaternion signRot = selectedTr.rotation;
+        selectedTr.rotation = Quaternion.identity;
+        
+        InsertSignature(
+                tileSignature, selectedTr.position, false, 
+            false, true, signRot.eulerAngles
+                );
+        
+        selectedTr.rotation = signRot;
+
+        
+        DrawPathLinks();
+    }
+    private bool InsertSignatureFromEditorSelection_Check(out TileSignature tileSignature, bool checkIfSpawned = true)
+    {
+        tileSignature = null;
+        
+        if (Selection.objects.Length <= 0) return false;
+        var so = Selection.objects[0] as GameObject;
+        if (so == null) return false;
+        
+        tileSignature = so.GetComponent<TileSignature>();
+        if (tileSignature == null) return false;
+        
+        bool sceneCheck = true;
+        if (checkIfSpawned) sceneCheck = tileSignature.gameObject.scene.IsValid();
+        
+        return (tileSignature != null && sceneCheck);
     }
 
     
@@ -917,7 +1043,7 @@ public class MazeGenerator : MonoBehaviour/*, IDragHandler, IBeginDragHandler*/
                 
                 
 
-                if (InsertSignature( signatureToInsert, insertSignatureStartShift, true ))
+                if (InsertSignature( signatureToInsert, insertSignatureStartShift, true, true, false ))
                 {
                     pathNode = pathToTarget[pathToTarget.Count - 1];
                     branchStartWPoint = pathNode.node.worldPos;
@@ -2359,7 +2485,7 @@ public class MazeGenerator : MonoBehaviour/*, IDragHandler, IBeginDragHandler*/
                 
 
                 //ERASER
-                if ( e.button==1 && pathNodeSelectionList.Count>1 && e.delta.sqrMagnitude > 2)
+                if ( e.button==1 && pathNodeSelectionList.Count>1 && e.delta.sqrMagnitude > 2 && mazeGenerator.transform.childCount==0)
                 {
                     PathNode selectedNode = pathToTarget.FirstOrDefault(v=>v.node==pathNodeSelectionList[0]);
 
@@ -2369,12 +2495,12 @@ public class MazeGenerator : MonoBehaviour/*, IDragHandler, IBeginDragHandler*/
                         if (link != null) selectedNode.RemoveLink(link);
 
                         pathToTarget.Remove(selectedNode);
-                    }
-                    
-                    //REPAINT SCENE
-                    RepaintSceneView();
+                        
+                        //REPAINT SCENE
+                        RepaintSceneView();
 
-                    mazeGenerator.DrawPathLinks();
+                        mazeGenerator.DrawPathLinks();
+                    }
                 }
             }
             

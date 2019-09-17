@@ -7,7 +7,7 @@ using UnityEngine;
 using UnityEditor;
 #endif
 
-
+[SelectionBase]
 public class TileSignature : MonoBehaviour
 {
     [Tooltip("Postive values = signature points. Negative = node links")]
@@ -15,16 +15,11 @@ public class TileSignature : MonoBehaviour
     public int preinsertCutRange = 1;
     public int gridStep = 10;
     public bool isVerticalConnector = false;
+    public bool drawSignature = false;
 
-
-/*    public bool calcVectors = false;
-    public float stepDist = 50;
-
-    public Transform[] signaturePoints = new Transform[0];*/
 
     [Tooltip("First and last items must be near to signatureLinks")]
     public List<Vector3> signatureVector = new List<Vector3>(){new Vector3(0,0,0)};
-    //public List<Vector3> signatureVector_additionalPoints = new List<Vector3>();
 
     public List<Vector3> signatureLinks = new List<Vector3>(); 
 
@@ -37,22 +32,39 @@ public class TileSignature : MonoBehaviour
 
 
 
+    private void OnDrawGizmosSelected()
+    {
+      
+        
+        if(drawSignature==false) return;
 
+        //Gizmos.color = Color.blue;
+        Debug.DrawLine(
+            SignatureToWorldPoint(signatureLinks[0]), 
+            SignatureToWorldPoint(signatureVector[0])
+            );
 
-/*	// Use this for initialization
-	void Start () {
+        for (var i = 1; i < signatureVector.Count; i++)
+        {
+            var v3_1 = signatureVector[i-1];
+            v3_1 = SignatureToWorldPoint(v3_1) ;
+            var v3_2 = signatureVector[i];
+            v3_2 = SignatureToWorldPoint(v3_2);
 
-	    if (calcVectors)
-	    {
-            signatureVector = new List<Vector3> ( );
+            Debug.DrawLine(v3_1, v3_2);
+        }
+        
+        Debug.DrawLine(
+            SignatureToWorldPoint(signatureLinks.Last()), 
+            SignatureToWorldPoint(signatureVector.Last())
+        );
+    }
 
-            foreach ( Transform signaturePoint in signaturePoints )
-            {
-                signatureVector.Add ( transform.InverseTransformPoint ( signaturePoint.position ) / stepDist );
-            }
-	    }
+    private Vector3 SignatureToWorldPoint(Vector3 v3)
+    {
+        return transform.TransformPoint(v3 * gridStep);
+    }
 
-	}*/
 
     [ContextMenu("Signatures From Child Cubes")]
     public void SignatureVectorsFromChildCubes()
