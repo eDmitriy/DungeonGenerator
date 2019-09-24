@@ -63,6 +63,10 @@ public class SceneBuilder : MonoBehaviour
         }
         set { tilesList = value; }
     }
+    
+    
+    
+    public MazeGenerator LastMazeGenerator { get; set; }
 
     #endregion
 
@@ -84,45 +88,18 @@ public class SceneBuilder : MonoBehaviour
     [ContextMenu("Generate")]
     public void Generate()
     {
+        Generate(true);
+    }
+
+    public void Generate(bool clearData)
+    {
         var startTime = DateTime.Now;
         
         #region Init data
-        
-        ClearConsole();
-        DestroyChilds();
-        ClearSpawnedBounds();
-        TilesList.Clear();
-        spawnedBounds.Clear();
-        
-        startTile.CompoundBounds();
-        spawnedBounds.Add( new BoundsWithObject(){bounds = startTile.Bounds, gameObject = startTile.gameObject} );
-        
-        
-        foreach (var tile in tilesList_withRatio)
-        {
-            int tileSpawnRatio = tile.spawnRatio;
-            if (tile.isCoridor) tileSpawnRatio *= coridorsRatioMult;
-            
-            for (int i = 0; i < tileSpawnRatio; i++)
-            {
-                TilesList.Add(tile);
-            }
-        }
-        
-        //TilesList = Resources.LoadAll<SceneBuilder_Tile> ( "SceneBuilder" ).ToList();
-        if (TilesList.Count == 0) return;
-        
-        openConnections.Clear();
-        currPlacedTilesCount = 0;
-        
-        foreach (TileConnection tileConnection in startTile.connectionsList)
-        {
-            openConnections.Add ( tileConnection );
-        }
 
-        foreach (SceneBuilder_Tile tile in TilesList)
+        if (clearData)
         {
-            tile.CompoundBounds();
+            if (InitDataForGeneration()) return;
         }
 
         #endregion
@@ -140,24 +117,11 @@ public class SceneBuilder : MonoBehaviour
 
         #endregion
 
-        //close all open connections for placed tiles
-        #region DeadEnds
 
-        List<SceneBuilder_Tile> deadEndTiles = TilesList.Where ( v => v.deadEnd ).ToList ( );
-
-        if (deadEndTiles.Count>0)
+        if (clearData)
         {
-            Debug.Log("OPenConnection count for deadEnds = " + openConnections.Count);
-
-            var openConnectionsCount = openConnections.Count;
-            for (int i = 0; i < openConnectionsCount; i++)
-            {
-                SpawningLoop ( ref deadEndTiles, false );
-            }
-
+            CloseDeadEnds();
         }
-
-        #endregion
 
         
         #region MarkSCeneDirty
@@ -175,16 +139,85 @@ public class SceneBuilder : MonoBehaviour
         Debug.Log( "GenerationTime = " + (DateTime.Now - startTime).TotalSeconds );
     }
 
+    public void CloseDeadEnds()
+    {
+        List<SceneBuilder_Tile> deadEndTiles = TilesList.Where(v => v.deadEnd).ToList();
 
-    
+        if (deadEndTiles.Count > 0)
+        {
+            Debug.Log("OPenConnection count for deadEnds = " + openConnections.Count);
+
+            var openConnectionsCount = openConnections.Count;
+            for (int i = 0; i < openConnectionsCount; i++)
+            {
+                SpawningLoop(ref deadEndTiles, false);
+            }
+        }
+    }
+
+    public bool InitDataForGeneration()
+    {
+        //ClearConsole();
+        DestroyChilds();
+        ClearSpawnedBounds();
+        TilesList.Clear();
+        spawnedBounds.Clear();
+
+        if (startTile != null)
+        {
+            startTile.CompoundBounds();
+            spawnedBounds.Add(new BoundsWithObject() {bounds = startTile.Bounds, gameObject = startTile.gameObject});
+
+
+            foreach (var tile in tilesList_withRatio)
+            {
+                int tileSpawnRatio = tile.spawnRatio;
+                if (tile.isCoridor) tileSpawnRatio *= coridorsRatioMult;
+
+                for (int i = 0; i < tileSpawnRatio; i++)
+                {
+                    TilesList.Add(tile);
+                }
+            }
+
+            //TilesList = Resources.LoadAll<SceneBuilder_Tile> ( "SceneBuilder" ).ToList();
+            if (TilesList.Count == 0) return true;
+
+            openConnections.Clear();
+            currPlacedTilesCount = 0;
+
+            foreach (TileConnection tileConnection in startTile.connectionsList)
+            {
+                openConnections.Add(tileConnection);
+            }
+        }
+
+        foreach (SceneBuilder_Tile tile in TilesList)
+        {
+            tile.CompoundBounds();
+        }
+
+        return false;
+    }
+
 
     private void SpawningLoop ( ref List<SceneBuilder_Tile> tiles, bool checkConnection )
     {
         if(openConnections.Count==0) return;
         
         
-        int randomIndex = Random.Range ( 0, openConnections.Count );
-        TileConnection connection = openConnections[randomIndex];
+        //int randomIndex = Random.Range ( 0, openConnections.Count );
+        List<TileConnection> tileConnections = openConnections.Where(v =>
+        {
+            if (LastMazeGenerator != null && checkConnection)
+            {
+                return LastMazeGenerator.gridBounds.Contains(v.connectionTransf.position);
+            }
+            return true;
+        }).ToList();
+        if(tileConnections.Count==0) return;
+        
+        TileConnection connection = tileConnections.GetRandom();  //openConnections[randomIndex];
 
         SceneBuilder_Tile newTile = SpawnTile ( connection, ref tiles, checkConnection );
 
@@ -193,13 +226,17 @@ public class SceneBuilder : MonoBehaviour
         if ( newTile != null )
         {
             connection.IsOpened = false;
-            openConnections.RemoveAt ( randomIndex );
-
+            //openConnections.RemoveAt ( randomIndex );
+            openConnections.Remove(connection);
+            
             currPlacedTilesCount++;
 
             foreach ( TileConnection tileConnection in newTile.connectionsList )
             {
-                if ( tileConnection.IsOpened ) openConnections.Add ( tileConnection );
+                if (tileConnection.IsOpened  )
+                {
+                    openConnections.Add(tileConnection);
+                }
             }
         }
         else if(checkConnection==false)
@@ -293,7 +330,7 @@ public class SceneBuilder : MonoBehaviour
                     
                     if ( checkSpawnAreaIsClear)
                     {
-                        var gp = SpawnTile(tileToSpawn, pos, rot);
+                        var gp = SpawnTilePrefab(tileToSpawn, pos, rot);
 
 
                         if ( gp != null )
@@ -306,7 +343,7 @@ public class SceneBuilder : MonoBehaviour
                             
                             
                             var openTileConnections = spawnedTile.connectionsList.Where(v=>v.IsOpened).ToList();
-                            if ( /*spawnedTile.connectionsList.Count > j*/ openTileConnections.Count>0)
+                            if ( openTileConnections.Count>0)
                             {
                                 var connection = /*spawnedTile.connectionsList.Where(v=>v.IsOpened)*/
                                     openTileConnections.OrderBy(v =>
@@ -321,6 +358,22 @@ public class SceneBuilder : MonoBehaviour
                             {
                                 TilesList.Remove(tileToSpawn);
                             }
+                            
+                            
+                            //INSERT SIGNATURE
+                            TileSignature tileSignature = gp.GetComponent<TileSignature>();
+                            if (LastMazeGenerator != null && tileSignature != null)
+                            {
+                                bool insertionResult = LastMazeGenerator.InsertSignature_FromSceneObject(tileSignature);
+                                gp.transform.SetParent(LastMazeGenerator.transform);
+
+                                if (insertionResult == false)
+                                {
+                                    DestroyImmediate(gp.gameObject);
+                                }
+
+                            }
+                            
                             return spawnedTile;
                         }
                     }
@@ -344,7 +397,7 @@ public class SceneBuilder : MonoBehaviour
 
 
 
-    private Transform SpawnTile(SceneBuilder_Tile tileToSpawn, Vector3 pos, Quaternion rot)
+    private Transform SpawnTilePrefab(SceneBuilder_Tile tileToSpawn, Vector3 pos, Quaternion rot)
     {
         Transform gp = null;
 
@@ -420,20 +473,9 @@ public class SceneBuilder : MonoBehaviour
     private bool CheckSpawnAreaIsClear_WithSpawn(SceneBuilder_Tile tileToSpawn, Vector3 pos, Quaternion rot, GameObject spawnConnection_Tile)
     {
         bool checkSpawnAreaIsClear = true;
-        
-/*                        checkSpawnAreaIsClear = CheckSpawnAreaIsClear (
-                            tileToSpawn.Bounds.size,
-                            spawnConnection.connectionTransf,
-                            //pos/*spawnConnection.connectionTransf.InverseTransformPoint ( pos )#1#/*,
-                            tileConnection.InverseCoonectionPos ( tileToSpawn.Bounds.center/*spawnConnection.connectionTransf.position#1#, rot )
-                            //pos
-                            ,tileToSpawn.Bounds.center - tileConnection.connectionTransf.position
-                            //spawnConnection.connectionTransf.InverseTransformPoint( tileToSpawn.Bounds.center )
-                            ,rot
-                        );*/
 
 
-        var spawnedTile = SpawnTile(tileToSpawn, pos, rot);
+        var spawnedTile = SpawnTilePrefab(tileToSpawn, pos, rot);
         SceneBuilder_Tile spawnedTile_comp = spawnedTile.GetComponent<SceneBuilder_Tile>();
 
         spawnedTile_comp.CompoundBounds();
@@ -452,6 +494,21 @@ public class SceneBuilder : MonoBehaviour
             checkSpawnAreaIsClear = false;
             //Debug.DrawRay (  castPos , Vector3.up * 30, Color.red, 20, false );
         }
+
+        if (LastMazeGenerator != null)
+        {
+            List<PathNode> pathToTarget = LastMazeGenerator.GetPathToTarget();
+            for (var i = 0; i < pathToTarget.Count; i++)
+            {
+                PathNode pn = pathToTarget[i];
+                if (bounds.Contains(pn.node.worldPos + Vector3.up*5))
+                {
+                    checkSpawnAreaIsClear = false;
+                    break;
+                }
+            }
+        }
+        
 
         //if (checkSpawnAreaIsClear == true)
         {

@@ -47,36 +47,41 @@ public class SceneBuilder_Tile : MonoBehaviour
 
     public void CompoundBounds()
     {
-        CompoundBounds(gameObject);
+        if (gameObject==null) return;
+        
+        Bounds = Bounds.CompoundBounds(gameObject);
     }
 
-    public void CompoundBounds ( GameObject go )
-    {
 
-        Bounds = new Bounds (go.transform.position, Vector3.zero );
+
+}
+
+public static class BoundsExtensions
+{
+    public static Bounds CompoundBounds (this Bounds bounds,  GameObject go )
+    {
+        if (go == null) return bounds;
+        
+        
+        bounds = new Bounds (go.transform.position, Vector3.zero );
         var renderers = go.GetComponentsInChildren<MeshRenderer> (false );
 
         foreach ( var renderer1 in renderers )
         {
-/*            if ( Bounds.extents == Vector3.zero )
+            if(!renderer1.enabled) continue;
+            if ( bounds.extents == Vector3.zero )
             {
-                Bounds = renderer1.bounds;
+                bounds = renderer1.bounds;
                 continue;
-            }*/
-
-            //if(renderer1.transform.position.sqrMagnitude < 1) continue;
+            }
             
-            
-            Bounds.Encapsulate ( renderer1.bounds );
+            bounds.Encapsulate ( renderer1.bounds );
         }
 
-        //bounds.extents *= 1.3f;
-        // bounds = go.GetComponent<Renderer>().bounds;
-        //bounds = bounds;
+
+        return bounds;
     }
-
 }
-
 
 
 
