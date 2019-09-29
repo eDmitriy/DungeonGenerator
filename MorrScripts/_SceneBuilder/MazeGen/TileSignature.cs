@@ -52,6 +52,7 @@ public class TileSignature : MonoBehaviour
             var v3_2 = signatureVector[i];
             v3_2 = SignatureToWorldPoint(v3_2);
 
+            Debug.DrawRay(v3_1, Vector3.up);
             Debug.DrawLine(v3_1, v3_2);
         }
 
@@ -114,6 +115,8 @@ public class TileSignature : MonoBehaviour
         Bounds bounds = new Bounds();
         bounds = bounds.CompoundBounds(gameObject);
         Vector3Int gridSize = new Vector3Int( (int)(bounds.size.x/gridStep), Mathf.CeilToInt(bounds.size.y/gridStep), (int)(bounds.size.z/gridStep) );
+        gridSize.z++;
+
         Vector3 startShift = bounds.center - gridSize * (gridStep / 2);
         startShift.y = transform.position.y;
         

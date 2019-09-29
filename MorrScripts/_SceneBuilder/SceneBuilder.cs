@@ -48,6 +48,12 @@ public class SceneBuilder : MonoBehaviour
         public GameObject gameObject;
     }
     List<BoundsWithObject> spawnedBounds = new List<BoundsWithObject>();
+
+    public List<BoundsWithObject> GetBoundsWithObjects()
+    {
+        return spawnedBounds;
+        
+    }
     
     
     public List<SceneBuilder_Tile> TilesList
@@ -162,6 +168,7 @@ public class SceneBuilder : MonoBehaviour
         ClearSpawnedBounds();
         TilesList.Clear();
         spawnedBounds.Clear();
+        openConnections.Clear();
 
         if (startTile != null)
         {
@@ -183,7 +190,6 @@ public class SceneBuilder : MonoBehaviour
             //TilesList = Resources.LoadAll<SceneBuilder_Tile> ( "SceneBuilder" ).ToList();
             if (TilesList.Count == 0) return true;
 
-            openConnections.Clear();
             currPlacedTilesCount = 0;
 
             foreach (TileConnection tileConnection in startTile.connectionsList)
@@ -225,19 +231,7 @@ public class SceneBuilder : MonoBehaviour
 
         if ( newTile != null )
         {
-            connection.IsOpened = false;
-            //openConnections.RemoveAt ( randomIndex );
-            openConnections.Remove(connection);
-            
-            currPlacedTilesCount++;
-
-            foreach ( TileConnection tileConnection in newTile.connectionsList )
-            {
-                if (tileConnection.IsOpened  )
-                {
-                    openConnections.Add(tileConnection);
-                }
-            }
+            AddOpenConnectionsFromSpawnedTile(newTile, connection);
         }
         else if(checkConnection==false)
         {
@@ -247,6 +241,29 @@ public class SceneBuilder : MonoBehaviour
             deadEndFailedGameObject.transform.SetParent( transform);
         }
     }
+
+    public void AddOpenConnectionsFromSpawnedTile(SceneBuilder_Tile newTile, TileConnection connection)
+    {
+        //Debug.Log("SBTile_Spawned. Connections count = " + newTile.connectionsList.Count, newTile.gameObject);
+
+        if (connection != null)
+        {
+            connection.IsOpened = false;
+            //openConnections.RemoveAt ( randomIndex );
+            openConnections.Remove(connection);
+        }
+
+        currPlacedTilesCount++;
+
+        foreach (TileConnection tileConnection in newTile.connectionsList)
+        {
+            if (tileConnection.IsOpened)
+            {
+                openConnections.Add(tileConnection);
+            }
+        }
+    }
+    
 
 
     private SceneBuilder_Tile SpawnTile(TileConnection spawnConnection, ref List<SceneBuilder_Tile> tiles, bool checkConnection)
@@ -362,7 +379,7 @@ public class SceneBuilder : MonoBehaviour
                             
                             //INSERT SIGNATURE
                             TileSignature tileSignature = gp.GetComponent<TileSignature>();
-                            if (LastMazeGenerator != null && tileSignature != null)
+                            if (checkConnection && LastMazeGenerator != null && tileSignature != null)
                             {
                                 bool insertionResult = LastMazeGenerator.InsertSignature_FromSceneObject(tileSignature);
                                 gp.transform.SetParent(LastMazeGenerator.transform);
@@ -388,7 +405,7 @@ public class SceneBuilder : MonoBehaviour
 
 
         }
-        Debug.Log("No fitting connections ", spawnConnection.connectionTransf);
+        //Debug.Log("No fitting connections ", spawnConnection.connectionTransf);
         //spawnConnection.CloseConnection(/*spawnConnection*/null); //this will prevent deadEnd spawning
         
         
@@ -631,6 +648,11 @@ public class SceneBuilder_Editor : Editor
         {
             SceneBuilder sceneBuilder = (SceneBuilder)target;
             sceneBuilder.Generate();
+        }
+        if ( GUILayout.Button ( "CloseDeadEnds" ) )
+        {
+            SceneBuilder sceneBuilder = (SceneBuilder)target;
+            sceneBuilder.CloseDeadEnds();
         }
         if ( GUILayout.Button ( "DestroyChilds" ) )
         {

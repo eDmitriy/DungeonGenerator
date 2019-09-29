@@ -426,6 +426,20 @@ public class MazeGenerator : MonoBehaviour
 
         GUILayout.BeginArea ( new Rect(5,150, 60, 300));
         GUILayout.BeginVertical();
+
+
+        #region DrawPath toggle
+
+        bool drawStateTemp = drawPathLinksSettings.draw;
+        drawPathLinksSettings.draw = GUILayout.Toggle(drawPathLinksSettings.draw, "Draw");
+        if (drawPathLinksSettings.draw != drawStateTemp)
+        {
+            NodeSelector.RepaintSceneView();
+            DrawPathLinks();
+        }
+        GUILayout.Space(10);
+
+        #endregion
         
         #region GEnerationButtons
 
@@ -453,6 +467,14 @@ public class MazeGenerator : MonoBehaviour
         {
             CloseOpenPathEnds();
         }
+        
+        if (GUILayout.Button("Clear"))
+        {
+            CleanSpawned();
+            sceneBuilder.GenerateInitialData(null);
+            NodeSelector.RepaintSceneView();
+            DrawPathLinks();
+        }  
         #endregion
         
 
@@ -462,16 +484,11 @@ public class MazeGenerator : MonoBehaviour
         
         if (GUILayout.Button("Sign"))
         {
+            sceneBuilder.sceneBuilder.CloseDeadEnds();
             ConnectSeparatedPathParts();
             ScanSignatures();
         }
-        if (GUILayout.Button("Clear"))
-        {
-            CleanSpawned();
-            sceneBuilder.GenerateInitialData(null);
-            NodeSelector.RepaintSceneView();
-            DrawPathLinks();
-        }  
+
         if (GUILayout.Button("DelMesh"))
         {
             DestroySpawnedMeshes();
@@ -524,6 +541,13 @@ public class MazeGenerator : MonoBehaviour
                 Selection.objects = new UnityEngine.Object[0];
             }  
         }
+
+        int openConnectionsCount = sceneBuilder.sceneBuilder.openConnections.Count;
+        if (openConnectionsCount>0 && GUILayout.Button("SB Dead\nEnds "+openConnectionsCount))
+        {
+            sceneBuilder.sceneBuilder.CloseDeadEnds();
+        }
+
 
 
         
@@ -665,7 +689,7 @@ public class MazeGenerator : MonoBehaviour
                     Quaternion.Euler(0, Random.Range(0,350), 0) * Vector3.one*50
             );*/
             if (pathNode == null || pathNode.node == null) continue;
-            
+            //if(pathNode.node.hasPreinserted) continue;
 
             Color color = pathNode.node.hasPreinserted ? Color.blue : new Color(1,1,0,0.5f);
 
@@ -685,6 +709,7 @@ public class MazeGenerator : MonoBehaviour
             foreach ( var link in pathNode.links )
             {
                 if(link==null || link.node==null) continue;
+                //if(link.node.hasPreinserted) continue;
 
                 color = drS.defaultLinksColor;//new Color(1,1,0,0.05f);
 
@@ -707,10 +732,10 @@ public class MazeGenerator : MonoBehaviour
                 }
 
 
-                if (pathNode.links.Count<2 /*&& pathToTarget.Any(v=> v!= pathNode && v.node==pathNode.node)==false*/ )
+/*                if (pathNode.links.Count<2 )
                 {
                     color = Color.red;
-                }
+                }*/
   
                 Debug.DrawLine (
                     pathNode.node.worldPos + camUp * Random.Range ( -shift*drawShift_floorMult, shift*drawShift_floorMult ),
@@ -750,6 +775,8 @@ public class MazeGenerator : MonoBehaviour
         
             CleanSpawned(true);
             GenerateGrid ( );
+            
+            GC.Collect();
 
             sceneBuilder.GenerateInitialData(null);
 
@@ -757,10 +784,10 @@ public class MazeGenerator : MonoBehaviour
             #region SIGNATURE INSERTION
 
             //var hG = gridSize.z / stepDist / 2f;
-            var insertSignatureStartShift = Vector3.zero;//new Vector3( 0,0, Random.Range( -hG,  hG ));
+/*            var insertSignatureStartShift = Vector3.zero;//new Vector3( 0,0, Random.Range( -hG,  hG ));
             InsertSignature(signatureInsertion.startTile, insertSignatureStartShift, false, true, false );
 
-            if (GrowPoints.Count > 0) endNode = GrowPoints[0];
+            if (GrowPoints.Count > 0) endNode = GrowPoints[0];*/
 
 
             TileSignature[] tileSignatures = FindObjectsOfType<TileSignature>();
@@ -972,7 +999,7 @@ public class MazeGenerator : MonoBehaviour
                     }
     
     
-                    pathNode = new PathNode() {node = node, step = stepDist};
+                    pathNode = new PathNode() {node = node, step = stepDist/*, isSceneBuilderPart = sceneBuilderTile!=null*/ };
                     if (prevNode != null) pathNode.AddLink(prevNode);
     
                     prevNode = pathNode;
@@ -1025,6 +1052,7 @@ public class MazeGenerator : MonoBehaviour
                         {
                             childTr.SetParent(transform);
                         }
+                        sceneBuilder.sceneBuilder.AddOpenConnectionsFromSpawnedTile(spawnedSBTile, null);
                         sceneBuilder.Generate(spawnedSBTile, this);
                     }
                     
@@ -2727,7 +2755,9 @@ public class PathNode
     public List<PathNode> links = new List<PathNode>();
     //public List<PathNode> pathLinks = new List<PathNode> ( );
 
-
+    public string collectionName = "";
+    //public bool isSceneBuilderPart = false;
+    
     
 /*    public class ForcedSignature
     {
@@ -2824,7 +2854,7 @@ public class Node
 
     //[HideInInspector] 
     public List<Node> links = new List<Node>();
-    public static List<Node> allMapNodesList = new List<Node>();
+    //public static List<Node> allMapNodesList = new List<Node>();
 
 
     public bool occupiedByTile = false;
@@ -2859,13 +2889,11 @@ public class MazeGenerator_Editor : Editor
     {
         DrawDefaultInspector ( );
 
-
         var generator = (MazeGenerator) target;
 
 
 
-
-        if ( GUILayout.Button ( "Generate nodes (L_Shift to Clear)" ) )
+        if ( GUILayout.Button ( "Generate" ) )
         {
             generator.BuildPathPointsForSignatureCheck();
         }
@@ -2878,155 +2906,8 @@ public class MazeGenerator_Editor : Editor
         {
             generator.CleanSpawned(true);
         }
-        
-        if ( GUILayout.Button ( "GetNodeByWorldPos" ) )
-        {
-            generator.GetNodeByWorldPosGizmo();
-        }
+
     }
-
-/*    void OnSceneGUI()
-    {
-        return;
-
-        var generator = (MazeGenerator)target;
-
-
-        Vector3 pos = generator.currGridBrushPointerPos;
-
-        if (generator.drawingGridBrushNow)
-        {
-            generator.Update ( );//.CalcCurrPointerPosition ( );
-            SceneView.RepaintAll ( );
-            
-            OverrideMouseButtons ( generator, pos );
-        }
-
-
-
-        var e = Event.current;
-        switch ( e.type )
-        {
-            case EventType.keyDown:
-            {
-                if ( e.keyCode == ( KeyCode.B ) )
-                {
-                    generator.drawingGridBrushNow = !generator.drawingGridBrushNow;
-                }
-                break;
-            }
-        }
-
-
-
-        Handles.color = generator.drawingGridBrushNow ? Color.red : Color.white;
-        Handles.DrawWireCube ( pos, Vector3.one* generator.stepDist );
-        Handles.DrawLine(pos, pos+Vector3.up*generator.stepDist/2);
-
-
-        if ( generator.currGridBrushPointer_DragStartPos.sqrMagnitude>0 )
-        {
-            Handles.DrawLine ( generator.currGridBrushPointer_DragStartPos, pos );
-        }
-
-    }*/
-
-
-/*
-    void OverrideMouseButtons(MazeGenerator generator, Vector3 pos)
-    {
-        int controlId = GUIUtility.GetControlID ( FocusType.Passive );
-
-        if ( Event.current.button != 2 )
-        {
-            switch ( Event.current.GetTypeForControl ( controlId ) )
-            {
-                case EventType.MouseDown:
-                    GUIUtility.hotControl = controlId;
-
-                    //Ваша логика использования события MouseDown
-
-                    //Левая кнопка мыши
-                    if ( Event.current.button == 0 )
-                    {
-                        Debug.Log ( "SceneGUIClick left" );
-                        generator.currGridBrushPointer_DragStartPos = pos;
-
-                        generator.drawGridBrash_StartNode = generator.GetNodeByWorldPos(pos);
-                    }
-
-                    //Правая кнопка мыши
-                    if ( Event.current.button == 1 )
-                    {
-                        Debug.Log ( "SceneGUIClick Right" );
-
-                        generator.DeleteBlock ( );
-                    }
-
-
-
-                    //Используем событие
-                    Event.current.Use ( );
-
-                    break;
-
-                case EventType.MouseDrag:
-                    GUIUtility.hotControl = controlId;
-
-                    //Левая кнопка мыши
-                    if ( Event.current.button == 0 )
-                    {
-                        generator.drawGridBrash_CurrNode = generator.GetNodeByWorldPos ( pos );
-
-
-                        Node startNode = generator.drawGridBrash_StartNode;
-                        Node currNode = generator.drawGridBrash_CurrNode;
-
-                        if ( currNode != null && startNode != null
-                             && currNode != startNode && currNode.links.Contains ( startNode )
-                             && currNode.pathNode != null && startNode.pathNode != null )
-                        {
-                            //connect to start node
-                            //currNode.CreateLink(startNode);
-                            currNode.pathNode.AddLink ( startNode.pathNode );
-                            //currNode.occupiedByTile = true;
-
-                            //path
-                            if ( generator.pathToTarget == null )
-                            {
-                                generator.pathToTarget = new List<PathNode> ( );
-                            }
-                            generator.pathToTarget.Add ( currNode.pathNode );
-
-                            //start node = currNode
-                            generator.drawGridBrash_StartNode = currNode;
-                        }
-                    }
-
-                    if (Event.current.button == 1)
-                    {
-                        generator.DeleteBlock ( );
-                    }
-
-                    Event.current.Use ( );
-
-
-                    break;
-
-                case EventType.MouseUp:
-                    //Возвращаем другим control доступ к событиям мыши
-                    generator.currGridBrushPointer_DragStartPos = Vector3.zero;
-
-                    GUIUtility.hotControl = 0;
-                    Event.current.Use ( );
-
-                    break;
-
-            }
-        }
-    }
-*/
-
 
 
 }
